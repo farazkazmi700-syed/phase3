@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analytics Dashboard — Multi-Turn AI Chatbot</title>
+
+  <!-- Shared stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- Analytics-specific stylesheet (appended to style.css) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js CDN — used for all FR20 graphs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body class="page-body analytics-body">
+  <div class="page-shell">
+
+    <!-- ================================================================
+         Sidebar navigation (mirrors chat.html / feedback.html layout)
+         ================================================================ -->
+    <aside class="page-sidebar" id="an-sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">Multi-Turn AI Chatbot</div>
+        <button class="btn-icon btn-sidebar-toggle sidebar-header-toggle" id="btn-sidebar-header-toggle" type="button" title="Toggle navigation" aria-label="Toggle navigation" aria-expanded="true" aria-controls="an-sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+        <nav class="page-nav" aria-label="Main navigation">
+          <a class="menu-item analytics-menu-item active" href="/analytics" aria-current="page">Analytics</a>
+          <a class="menu-item" href="/chat">Chat</a>
+          <a class="menu-item feedback-menu-item" href="/feedback">Feedback</a>
+        </nav>
+
+      <!-- Signed-in user info -->
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <img
+            class="user-avatar"
+            src="{{ user.get('picture', '') or 'https://ui-avatars.com/api/?name=User&background=111111&color=ffffff' }}"
+            alt="{{ user.get('name', 'User') }} profile"
+            title="{{ user.get('name', 'User') }} ({{ user.get('email', '') }})"
+          />
+          <div class="user-info">
+            <span class="user-name">{{ user.get('name', 'User') }}</span>
+            <span class="user-email">{{ user.get('email', '') }}</span>
+          </div>
+        </div>
+        {% if user.get('id') %}
+        <a href="/auth/logout" class="btn-logout" title="Log out" aria-label="Log out">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 17l5-5-5-5"></path>
+            <path d="M15 12H3"></path>
+            <path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"></path>
+          </svg>
+          <span>Log out</span>
+        </a>
+        {% else %}
+        <a href="/login" class="btn-login" title="Log in" aria-label="Log in">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 17l5-5-5-5"></path>
+            <path d="M19 12H9"></path>
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7"></path>
+          </svg>
+          <span>Log in</span>
+        </a>
+        {% endif %}
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- ================================================================
+         Main analytics content area
+         ================================================================ -->
+    <main class="analytics-main" id="analytics-main" tabindex="-1">
+
+      <!-- Page header -->
+      <header class="chat-header analytics-header">
+        <div class="chat-title analytics-title-group">
+          <div>
+            <h1>Analytics Dashboard</h1>
+            
+          </div>
+        </div>
+        <!-- FR22: End session button -->
+        <button class="btn-end-session" id="btn-end-session" type="button">
+          End &amp; Save Summary
+        </button>
+      </header>
+
+      <!-- Loading state -->
+      <div class="an-loader" id="an-loader" aria-live="polite">
+        <div class="an-spinner"></div>
+        <span>Loading analytics…</span>
+      </div>
+
+      <!-- Error state -->
+      <div class="an-error hidden" id="an-error" role="alert"></div>
+
+      <!-- ============================================================
+           FR21: KPI Summary cards
+           ============================================================ -->
+      <section class="an-section hidden" id="an-content" aria-label="Analytics content">
+
+        <div class="kpi-grid" id="kpi-grid" aria-label="Key performance indicators">
+          <!-- Populated by analytics.js -->
+        </div>
+
+        <!-- ============================================================
+             FR20 / FR19: Graphs (top row) — topic distribution + accuracy per topic
+             ============================================================ -->
+        <div class="an-section-title">Visual Graphs</div>
+
+        <div class="charts-grid">
+
+          <!-- FR20: Topic distribution — pie chart -->
+          <div class="chart-card" id="chart-topic-dist-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Topic Distribution</span>
+              <span class="chart-card-sub">Pie chart — message share per domain</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-topic-dist" aria-label="Topic distribution pie chart" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Accuracy per topic — bar chart -->
+          <div class="chart-card" id="chart-topic-acc-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Accuracy per Topic</span>
+              <span class="chart-card-sub">Bar chart — % accuracy by domain</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-topic-acc" aria-label="Accuracy per topic bar chart" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Accuracy vs phase — line graph -->
+          <div class="chart-card" id="chart-phase-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Accuracy vs Phase</span>
+              <span class="chart-card-sub">Line — Start / Middle / End accuracy</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-phase-acc" aria-label="Accuracy vs phase line graph" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Correctness per reply — bar chart -->
+          <div class="chart-card" id="chart-reply-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Correctness per Reply</span>
+              <span class="chart-card-sub">Bar — accuracy % for each response</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-reply-acc" aria-label="Correctness per reply bar chart" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Response time trend — line graph -->
+          <div class="chart-card" id="chart-time-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Response Time Trend</span>
+              <span class="chart-card-sub">Line — ms per reply over time</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-response-time" aria-label="Response time trend line graph" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Rating distribution — bar chart -->
+          <div class="chart-card" id="chart-rating-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Rating Distribution</span>
+              <span class="chart-card-sub">Bar — count of each star rating</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-rating-dist" aria-label="Rating distribution bar chart" role="img"></canvas>
+            </div>
+          </div>
+
+          <!-- FR20: Length preference — pie chart -->
+          <div class="chart-card" id="chart-length-wrap">
+            <div class="chart-card-header">
+              <span class="chart-card-title">Length Preference</span>
+              <span class="chart-card-sub">Pie — Short / To the Point / Lengthy</span>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-length-dist" aria-label="Length preference pie chart" role="img"></canvas>
+            </div>
+          </div>
+
+        </div><!-- /charts-grid -->
+
+        <!-- ============================================================
+             FR19: Analytical Tables
+             ============================================================ -->
+        <div class="an-section-title">Analytical Tables</div>
+
+        <div class="tables-grid">
+
+          <!-- FR19: Topic vs accuracy table -->
+          <div class="table-card">
+            <div class="table-card-title">Topic vs Accuracy</div>
+            <div class="table-scroll">
+              <table id="tbl-topic-acc" class="an-table" aria-label="Topic accuracy table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Messages</th>
+                    <th>Rated</th>
+                    <th>Accuracy %</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-topic-acc-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- FR19: Phase-wise accuracy table -->
+          <div class="table-card">
+            <div class="table-card-title">Phase-wise Accuracy</div>
+            <div class="table-scroll">
+              <table id="tbl-phase-acc" class="an-table" aria-label="Phase accuracy table">
+                <thead>
+                  <tr>
+                    <th>Phase</th>
+                    <th>Accuracy %</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-phase-acc-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- FR19: Response time summary table -->
+          <div class="table-card">
+            <div class="table-card-title">Response Time Summary</div>
+            <div class="table-scroll">
+              <table id="tbl-resp-time" class="an-table" aria-label="Response time summary table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value (ms)</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-resp-time-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- FR19: Rating distribution table -->
+          <div class="table-card">
+            <div class="table-card-title">Rating Distribution</div>
+            <div class="table-scroll">
+              <table id="tbl-rating-dist" class="an-table" aria-label="Rating distribution table">
+                <thead>
+                  <tr>
+                    <th>Stars</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-rating-dist-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- FR19: Length preference table -->
+          <div class="table-card">
+            <div class="table-card-title">Length Preference</div>
+            <div class="table-scroll">
+              <table id="tbl-length-pref" class="an-table" aria-label="Length preference table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-length-pref-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div><!-- /tables-grid -->
+
+        <!-- ============================================================
+             FR21: Session-level insights
+             ============================================================ -->
+        <div class="an-section-title">Session-Level Insights</div>
+        <div class="table-card full-width">
+          <div class="table-scroll">
+            <table id="tbl-sessions" class="an-table" aria-label="Session insights table">
+              <thead>
+                <tr>
+                  <th>Session ID</th>
+                  <th>Started</th>
+                  <th>Messages</th>
+                  <th>Topics</th>
+                  <th>Accuracy %</th>
+                  <th>Avg Rating</th>
+                </tr>
+              </thead>
+              <tbody id="tbl-sessions-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="an-section-title">Reply Correctness</div>
+        <div class="table-card full-width">
+          <div class="table-scroll">
+            <table id="tbl-reply-corr" class="an-table" aria-label="Reply correctness table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Time</th>
+                  <th>Session</th>
+                  <th>Topic</th>
+                  <th>Phase</th>
+                  <th>Correctness</th>
+                  <th>Accuracy</th>
+                  <th>Rating</th>
+                  <th>Length</th>
+                </tr>
+              </thead>
+              <tbody id="tbl-reply-corr-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </section><!-- /an-content -->
+
+      <!-- FR22: End-session confirmation toast -->
+      <div class="an-toast hidden" id="an-toast" role="status" aria-live="polite"></div>
+
+    </main>
+  </div><!-- /page-shell -->
+
+  <script src="/static/js/navigation.js"></script>
+  <script src="/static/js/analytics.js"></script>
+</body>
+</html>
