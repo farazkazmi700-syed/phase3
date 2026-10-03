@@ -3,6 +3,7 @@ import uuid
 from flask import Blueprint, redirect, render_template, request, session, url_for
 from google_auth_oauthlib.flow import Flow
 
+from .analytics import save_final_analytics_summary
 from .config import Config
 from .db import get_db
 from .utils import google_credentials_path, now_iso, require_login, safe_redirect_target
@@ -160,6 +161,7 @@ def auth_callback():
         session["username"] = profile["name"]
         session["email"] = profile["email"]
         session["picture_url"] = profile["picture_url"]
+        session["analytics_session_id"] = str(uuid.uuid4())
 
         return redirect(redirect_target)
     except Exception as exc:
@@ -170,6 +172,17 @@ def auth_callback():
 @auth_bp.route("/auth/logout")
 @require_login
 def logout():
-    """Log the current user out and clear session state."""
+    """Save the final analytics summary before clearing the login session."""
+    user_id = session["user_id"]
+    analytics_session_id = session.get("analytics_session_id") or str(uuid.uuid4())
+    try:
+        save_final_analytics_summary(user_id, analytics_session_id)
+    except Exception:
+        return (
+            "Could not save the final analytics summary. You are still signed in; "
+            "please retry logging out.",
+            500,
+        )
+
     session.clear()
     return redirect(url_for("auth.login"))

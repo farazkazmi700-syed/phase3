@@ -13,6 +13,7 @@ if __package__ in (None, ""):
     from backend.db import close_db, get_db, init_db
     from backend.feedback import feedback_bp
     from backend.analytics import analytics_bp
+    from backend.llm import load_llama_model
     from backend.utils import google_credentials_path
 else:
     from .auth import auth_bp
@@ -21,6 +22,7 @@ else:
     from .db import close_db, get_db, init_db
     from .feedback import feedback_bp
     from .analytics import analytics_bp
+    from .llm import load_llama_model
     from .utils import google_credentials_path
 
 
@@ -37,6 +39,7 @@ def create_app():
     # Open SQLite lazily per request and close it automatically afterward.
     app.teardown_appcontext(close_db)
     init_db()
+    load_llama_model()
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(chat_bp)

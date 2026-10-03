@@ -14,8 +14,6 @@ const feedbackPage = {
     feedbackPage.currentMessageId = params.get('message_id');
     feedbackPage.currentSessionId = params.get('session_id');
 
-    feedbackPage.updateTargetBadge();
-
     document.querySelectorAll('.star').forEach(star => {
       star.addEventListener('click', () => {
         feedbackPage.setRating(parseInt(star.dataset.value, 10));
@@ -25,13 +23,6 @@ const feedbackPage = {
     feedbackPage.bindOptionGroup('correctness-group', 'selectedCorrectness');
     feedbackPage.bindOptionGroup('length-group', 'selectedLength');
     document.getElementById('btn-submit-feedback').addEventListener('click', feedbackPage.submit);
-  },
-
-  // Header pill shows whether a specific reply or general feedback is being rated.
-  updateTargetBadge() {
-    const badge = document.getElementById('feedback-target-badge');
-    if (!badge) return;
-    badge.textContent = feedbackPage.currentMessageId ? 'Response feedback' : 'General feedback';
   },
 
   // One-click option groups for correctness and response length.

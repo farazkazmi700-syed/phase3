@@ -8,7 +8,7 @@
  *  - Render 7 Chart.js responsive graphs (FR20)
  *  - Populate 6 analytical tables + session insights (FR19, FR21)
  *  - Render KPI summary cards (FR21)
- *  - Handle "End & Save Summary" button → POST /api/analytics/end-session (FR22)
+ *  - Display the saved analytics summary for the authenticated user (FR22)
  */
 
 /* ============================================================
@@ -29,15 +29,20 @@ const PALETTE = {
   background: '#1E293B',
 };
 
-/** Five topic colours — index-matched to the TOPIC_MAP order in analytics.py */
-const TOPIC_COLORS = [
-  PALETTE.blue,
-  PALETTE.purple,
-  PALETTE.green,
-  PALETTE.yellow,
-  PALETTE.cyan,
-  PALETTE.orange,  // "General / Other"
+const TOPIC_DOMAINS = [
+  'Machine Learning',
+  'Deep Learning',
+  'Healthcare AI',
+  'Power Systems',
+  'E-commerce AI',
 ];
+const TOPIC_CHART_COLORS = {
+  'Machine Learning': PALETTE.red,
+  'Deep Learning': PALETTE.orange,
+  'Healthcare AI': PALETTE.yellow,
+  'Power Systems': PALETTE.green,
+  'E-commerce AI': '#5081A2',
+};
 
 /* Chart.js global defaults for dark theme */
 Chart.defaults.color            = PALETTE.muted;
@@ -142,9 +147,9 @@ function renderKPICards(d) {
  * Shows the share of messages for each AI domain.
  */
 function renderTopicDistChart(topicAccuracy) {
-  const labels = Object.keys(topicAccuracy);
-  const data   = labels.map(l => topicAccuracy[l].count);
-  const colors = labels.map((_, i) => TOPIC_COLORS[i % TOPIC_COLORS.length]);
+  const labels = TOPIC_DOMAINS;
+  const data   = labels.map(label => topicAccuracy[label]?.count ?? 0);
+  const colors = labels.map(label => TOPIC_CHART_COLORS[label]);
 
   makeChart('chart-topic-dist', 'pie', {
     labels,
@@ -172,9 +177,9 @@ function renderTopicDistChart(topicAccuracy) {
  * Displays accuracy percentage for each classified domain.
  */
 function renderTopicAccChart(topicAccuracy) {
-  const labels   = Object.keys(topicAccuracy);
-  const accData  = labels.map(l => topicAccuracy[l].accuracy);
-  const colors   = labels.map((_, i) => TOPIC_COLORS[i % TOPIC_COLORS.length]);
+  const labels   = TOPIC_DOMAINS;
+  const accData  = labels.map(label => topicAccuracy[label]?.accuracy ?? 0);
+  const colors   = labels.map(label => TOPIC_CHART_COLORS[label]);
 
   makeChart('chart-topic-acc', 'bar', {
     labels,
@@ -216,9 +221,9 @@ function renderPhaseAccChart(phaseAccuracy) {
     datasets: [{
       label:           'Accuracy %',
       data,
-      borderColor:     PALETTE.blue,
-      backgroundColor: PALETTE.blue + '33',
-      pointBackgroundColor: PALETTE.blue,
+      borderColor:     PALETTE.green,
+      backgroundColor: PALETTE.green + '33',
+      pointBackgroundColor: PALETTE.green,
       pointRadius:     6,
       pointHoverRadius: 8,
       fill:            true,
@@ -298,8 +303,8 @@ function renderResponseTimeChart(timeSeries) {
     datasets: [{
       label:           'Response Time (ms)',
       data:            timeSeries,
-      borderColor:     PALETTE.purple,
-      backgroundColor: PALETTE.purple + '22',
+      borderColor:     PALETTE.orange,
+      backgroundColor: PALETTE.orange + '22',
       pointRadius:     timeSeries.length < 20 ? 4 : 2,
       fill:            true,
       tension:         0.3,
@@ -365,7 +370,7 @@ function renderRatingDistChart(ratingDist) {
 function renderLengthDistChart(lengthDist) {
   const labels = Object.keys(lengthDist);
   const data   = Object.values(lengthDist);
-  const colors = [PALETTE.cyan, PALETTE.green, PALETTE.orange];
+  const colors = [PALETTE.orange, PALETTE.yellow, PALETTE.green];
 
   makeChart('chart-length-dist', 'pie', {
     labels,
@@ -525,50 +530,6 @@ function renderSessionInsightsTable(sessions) {
 }
 
 /* ============================================================
-   FR22: End session handler
-   ============================================================ */
-
-/**
- * POST /api/analytics/end-session — permanently save the final analytics
- * summary for this user.  Shows a toast on success or failure.
- */
-async function handleEndSession() {
-  const btn   = document.getElementById('btn-end-session');
-  const toast = document.getElementById('an-toast');
-  if (!btn || !toast) return;
-
-  btn.disabled    = true;
-  btn.textContent = 'Saving…';
-
-  try {
-    const res  = await fetch('/api/analytics/end-session', {
-      method:      'POST',
-      headers:     { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body:        JSON.stringify({}),
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (res.ok && data.success) {
-      toast.textContent = 'Session summary saved permanently.';
-      toast.className   = 'an-toast an-toast-success';
-    } else {
-      toast.textContent = `Error: ${data.error || 'Could not save summary.'}`;
-      toast.className   = 'an-toast an-toast-error';
-    }
-  } catch (err) {
-    toast.textContent = `Network error: ${err.message}`;
-    toast.className   = 'an-toast an-toast-error';
-  }
-
-  // Show toast then auto-hide after 4 s.
-  show('an-toast');
-  btn.disabled    = false;
-  btn.textContent = 'End & Save Summary';
-  setTimeout(() => hide('an-toast'), 4000);
-}
-
-/* ============================================================
    Main initialisation — fetch data and wire everything together
    ============================================================ */
 
@@ -584,6 +545,16 @@ async function initAnalytics() {
     }
 
     hide('an-loader');
+
+    // FR14: Update subtitle with real-time stored session retrieval status
+    const subtitle = document.getElementById('analytics-subtitle');
+    if (subtitle) {
+      if (data.total_sessions > 0) {
+        subtitle.textContent = `Analyzed ${data.total_sessions} stored session${data.total_sessions !== 1 ? 's' : ''} (${data.total_messages} response${data.total_messages !== 1 ? 's' : ''}) retrieved from database.`;
+      } else {
+        subtitle.textContent = 'No stored session data found in database. Start chatting to view analysis.';
+      }
+    }
 
     // Render KPI summary cards (FR21)
     renderKPICards(data);
@@ -627,8 +598,4 @@ async function initAnalytics() {
 document.addEventListener('DOMContentLoaded', () => {
   // Initialise dashboard data
   initAnalytics();
-
-  // FR22: wire End Session button
-  document.getElementById('btn-end-session')
-    ?.addEventListener('click', handleEndSession);
 });

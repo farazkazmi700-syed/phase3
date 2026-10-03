@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, render_template, session
 
+from .analytics import classify_topic
 from .db import get_db
 from .llm import LocalLlamaError, build_llm_messages, query_llama
 from .utils import current_user, current_user_id, json_payload, now_iso, require_login
@@ -29,15 +30,8 @@ def session_title(first_message: str | None = None) -> str:
 
 
 def topic_label_from_message(message: str) -> str:
-    """FR11: create a compact topic label stored with each interaction."""
-    words = [
-        word.strip(".,!?;:()[]{}\"'").lower()
-        for word in message.split()
-        if word.strip(".,!?;:()[]{}\"'")
-    ]
-    if not words:
-        return "general"
-    return " ".join(words[:4])[:60]
+    """FR11: classify the full user message into a canonical domain."""
+    return classify_topic(message)
 
 
 def create_chat_session(db, first_message: str | None = None) -> tuple[str, str]:

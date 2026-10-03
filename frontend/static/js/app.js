@@ -82,8 +82,14 @@ const ui = {
     if (messageId) message.dataset.msgId = messageId;
 
     const isAssistant = role === 'assistant';
+    const userAvatar = document.getElementById('user-avatar')?.src;
+    const avatarContent = isAssistant
+      ? 'LLaMA 3'
+      : userAvatar
+        ? `<img src="${ui.escapeHtml(userAvatar)}" alt="">`
+        : 'You';
     message.innerHTML = `
-      <div class="msg-avatar">${isAssistant ? 'AI' : 'You'}</div>
+      <div class="msg-avatar">${avatarContent}</div>
       <div class="msg-content">
         <div class="msg-bubble">${ui.escapeHtml(content).replaceAll('\n', '<br>')}</div>
         <div class="msg-meta">
@@ -123,7 +129,7 @@ const ui = {
     typing.className = 'message assistant typing-indicator';
     typing.id = 'typing-indicator';
     typing.innerHTML = `
-      <div class="msg-avatar">AI</div>
+      <div class="msg-avatar">LLaMA 3</div>
       <div class="msg-content">
         <div class="msg-bubble">
           <span class="typing-dot"></span>

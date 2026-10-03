@@ -4,22 +4,22 @@ analytics.py — Phase 3 Analytics System (FR14–FR22)
 Blueprint exposing three routes:
   GET  /analytics               → render the analytics dashboard page
   GET  /api/analytics/data      → return full computed JSON payload
-  POST /api/analytics/end-session → FR22: finalise and permanently store a summary
 """
 
+import re
 import uuid
 from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template
 
 from .db import get_db
-from .utils import current_user, current_user_id, json_payload, now_iso, require_login
+from .utils import current_user, current_user_id, now_iso, require_login
 
 analytics_bp = Blueprint("analytics", __name__)
 
 # ---------------------------------------------------------------------------
 # FR15: canonical topic domains mapped from the raw topic_label keywords.
-# The first matching keyword wins; "General / Other" is the fallback.
+# The first matching keyword wins; Machine Learning is the fallback.
 # ---------------------------------------------------------------------------
 TOPIC_MAP = [
     ("Machine Learning",  ["machine learning", "ml", "regression", "classification",
@@ -38,6 +38,17 @@ TOPIC_MAP = [
                            "shopping", "cart", "checkout", "price", "inventory",
                            "customer", "fraud", "personalisation", "personaliz"]),
 ]
+TOPIC_DOMAINS = tuple(domain for domain, _ in TOPIC_MAP)
+TOPIC_PATTERNS = tuple(
+    (
+        domain,
+        tuple(
+            re.compile(rf"(?<!\w){re.escape(keyword)}s?(?!\w)", re.IGNORECASE)
+            for keyword in keywords
+        ),
+    )
+    for domain, keywords in TOPIC_MAP
+)
 
 PHASES = ("Start", "Middle", "End")
 
@@ -60,6 +71,16 @@ def fetch_session_data(user_id: str) -> list[dict]:
             m.session_id,
             m.content,
             m.topic_label,
+                        (
+                                SELECT u.content
+                                FROM messages u
+                                WHERE u.session_id = m.session_id
+                                    AND u.user_id = m.user_id
+                                    AND u.role = 'user'
+                                    AND u.rowid < m.rowid
+                                ORDER BY u.rowid DESC
+                                LIMIT 1
+                        ) AS user_message,
             m.created_at,
             m.response_time_ms,
             f.rating,
@@ -99,17 +120,20 @@ def fetch_session_list(user_id: str) -> list[dict]:
 def classify_topic(label: str | None) -> str:
     """
     FR15: Map a raw topic_label string to one of the five canonical domains.
-    Matching is case-insensitive keyword search; the first match wins.
-    Returns 'General / Other' if no keyword matches.
+    Matching is case-insensitive whole-keyword scoring; the strongest match wins.
+    Returns 'Machine Learning' if no keyword matches.
     """
     if not label:
-        return "General / Other"
+        return TOPIC_DOMAINS[0]
 
-    lower = label.lower()
-    for domain, keywords in TOPIC_MAP:
-        if any(kw in lower for kw in keywords):
-            return domain
-    return "General / Other"
+    best_domain = TOPIC_DOMAINS[0]
+    best_score = 0
+    for domain, patterns in TOPIC_PATTERNS:
+        score = sum(pattern.search(label) is not None for pattern in patterns)
+        if score > best_score:
+            best_domain = domain
+            best_score = score
+    return best_domain
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +176,7 @@ def compute_metrics(rows: list[dict]) -> dict:
     for session_rows in sessions.values():
         total = len(session_rows)
         for idx, row in enumerate(session_rows):
-            row["topic"] = classify_topic(row.get("topic_label"))
+            row["topic"] = classify_topic(row.get("user_message") or row.get("topic_label"))
             row["phase"] = segment_phase(idx, total)
 
     # Flatten back to a single list for aggregate calculations.
@@ -184,7 +208,10 @@ def compute_metrics(rows: list[dict]) -> dict:
     )
 
     # ---- FR17: accuracy per topic ----------------------------------------
-    topic_stats: dict[str, dict] = {}
+    topic_stats: dict[str, dict] = {
+        domain: {"count": 0, "acc_sum": 0.0, "rated": 0}
+        for domain in TOPIC_DOMAINS
+    }
     for row in all_rows:
         t = row["topic"]
         if t not in topic_stats:
@@ -341,43 +368,38 @@ def analytics_data():
         return jsonify({"error": str(exc)}), 500
 
 
-@analytics_bp.route("/api/analytics/end-session", methods=["POST"])
-@require_login
-def end_session():
-    """
-    FR22: End the current analytics session and permanently store the final
-    summary in the analytics_summaries table.
-    """
-    data       = json_payload()
-    session_id = data.get("session_id")  # optional: scope to one session
-    user_id    = current_user_id()
+def save_final_analytics_summary(user_id: str, session_id: str) -> str:
+    """Permanently save one account summary for a signed-in session."""
+    db = get_db()
+    existing = db.execute(
+        "SELECT id FROM analytics_summaries WHERE user_id = ? AND session_id = ?",
+        (user_id, session_id),
+    ).fetchone()
+    if existing:
+        return existing["id"]
 
-    try:
-        payload   = build_analytics_payload(user_id)
-        db        = get_db()
-        summary_id = str(uuid.uuid4())
-        db.execute(
-            """
-            INSERT INTO analytics_summaries
-            (id, user_id, session_id, overall_accuracy, avg_rating,
-             correct_count, partial_count, incorrect_count,
-             total_messages, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                summary_id,
-                user_id,
-                session_id or "ALL",
-                payload["overall_accuracy"],
-                payload["avg_rating"],
-                payload["correct_count"],
-                payload["partial_count"],
-                payload["incorrect_count"],
-                payload["total_messages"],
-                now_iso(),
-            ),
-        )
-        db.commit()
-        return jsonify({"success": True, "summary_id": summary_id})
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    payload = build_analytics_payload(user_id)
+    summary_id = str(uuid.uuid4())
+    db.execute(
+        """
+        INSERT INTO analytics_summaries
+        (id, user_id, session_id, overall_accuracy, avg_rating,
+         correct_count, partial_count, incorrect_count,
+         total_messages, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            summary_id,
+            user_id,
+            session_id,
+            payload["overall_accuracy"],
+            payload["avg_rating"],
+            payload["correct_count"],
+            payload["partial_count"],
+            payload["incorrect_count"],
+            payload["total_messages"],
+            now_iso(),
+        ),
+    )
+    db.commit()
+    return summary_id

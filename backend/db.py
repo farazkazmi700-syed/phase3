@@ -115,7 +115,7 @@ def init_db():
         """
     )
 
-    # FR22: analytics_summaries stores one permanent record per end-session call.
+    # FR22: analytics_summaries stores one permanent record per signed-in session.
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS analytics_summaries (

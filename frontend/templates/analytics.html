@@ -87,10 +87,6 @@
             
           </div>
         </div>
-        <!-- FR22: End session button -->
-        <button class="btn-end-session" id="btn-end-session" type="button">
-          End &amp; Save Summary
-        </button>
       </header>
 
       <!-- Loading state -->
@@ -118,80 +114,80 @@
 
         <div class="charts-grid">
 
-          <!-- FR20: Topic distribution — pie chart -->
+          <!-- FR20: Topic distribution -->
           <div class="chart-card" id="chart-topic-dist-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Topic Distribution</span>
-              <span class="chart-card-sub">Pie chart — message share per domain</span>
+              <span class="chart-card-sub">Message share per domain</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-topic-dist" aria-label="Topic distribution pie chart" role="img"></canvas>
+              <canvas id="chart-topic-dist" aria-label="Topic distribution" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Accuracy per topic — bar chart -->
+          <!-- FR20: Accuracy per topic -->
           <div class="chart-card" id="chart-topic-acc-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Accuracy per Topic</span>
-              <span class="chart-card-sub">Bar chart — % accuracy by domain</span>
+              <span class="chart-card-sub">% accuracy by domain</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-topic-acc" aria-label="Accuracy per topic bar chart" role="img"></canvas>
+              <canvas id="chart-topic-acc" aria-label="Accuracy per topic" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Accuracy vs phase — line graph -->
+          <!-- FR20: Accuracy vs phase -->
           <div class="chart-card" id="chart-phase-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Accuracy vs Phase</span>
-              <span class="chart-card-sub">Line — Start / Middle / End accuracy</span>
+              <span class="chart-card-sub">Start / Middle / End accuracy</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-phase-acc" aria-label="Accuracy vs phase line graph" role="img"></canvas>
+              <canvas id="chart-phase-acc" aria-label="Accuracy vs phase" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Correctness per reply — bar chart -->
+          <!-- FR20: Correctness per reply -->
           <div class="chart-card" id="chart-reply-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Correctness per Reply</span>
-              <span class="chart-card-sub">Bar — accuracy % for each response</span>
+              <span class="chart-card-sub">Accuracy % for each response</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-reply-acc" aria-label="Correctness per reply bar chart" role="img"></canvas>
+              <canvas id="chart-reply-acc" aria-label="Correctness per reply" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Response time trend — line graph -->
+          <!-- FR20: Response time trend -->
           <div class="chart-card" id="chart-time-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Response Time Trend</span>
-              <span class="chart-card-sub">Line — ms per reply over time</span>
+              <span class="chart-card-sub">ms per reply over time</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-response-time" aria-label="Response time trend line graph" role="img"></canvas>
+              <canvas id="chart-response-time" aria-label="Response time trend" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Rating distribution — bar chart -->
+          <!-- FR20: Rating distribution -->
           <div class="chart-card" id="chart-rating-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Rating Distribution</span>
-              <span class="chart-card-sub">Bar — count of each star rating</span>
+              <span class="chart-card-sub">Count of each star rating</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-rating-dist" aria-label="Rating distribution bar chart" role="img"></canvas>
+              <canvas id="chart-rating-dist" aria-label="Rating distribution" role="img"></canvas>
             </div>
           </div>
 
-          <!-- FR20: Length preference — pie chart -->
+          <!-- FR20: Length preference -->
           <div class="chart-card" id="chart-length-wrap">
             <div class="chart-card-header">
               <span class="chart-card-title">Length Preference</span>
-              <span class="chart-card-sub">Pie — Short / To the Point / Lengthy</span>
+              <span class="chart-card-sub">Short / To the Point / Lengthy</span>
             </div>
             <div class="chart-canvas-wrap">
-              <canvas id="chart-length-dist" aria-label="Length preference pie chart" role="img"></canvas>
+              <canvas id="chart-length-dist" aria-label="Length preference" role="img"></canvas>
             </div>
           </div>
 
@@ -203,25 +199,6 @@
         <div class="an-section-title">Analytical Tables</div>
 
         <div class="tables-grid">
-
-          <!-- FR19: Topic vs accuracy table -->
-          <div class="table-card">
-            <div class="table-card-title">Topic vs Accuracy</div>
-            <div class="table-scroll">
-              <table id="tbl-topic-acc" class="an-table" aria-label="Topic accuracy table">
-                <thead>
-                  <tr>
-                    <th>Topic</th>
-                    <th>Messages</th>
-                    <th>Rated</th>
-                    <th>Accuracy %</th>
-                  </tr>
-                </thead>
-                <tbody id="tbl-topic-acc-body"></tbody>
-              </table>
-            </div>
-          </div>
-
           <!-- FR19: Phase-wise accuracy table -->
           <div class="table-card">
             <div class="table-card-title">Phase-wise Accuracy</div>
@@ -332,10 +309,25 @@
           </div>
         </div>
 
-      </section><!-- /an-content -->
+        <!-- FR19: Topic vs accuracy table, listed after reply correctness. -->
+        <div class="table-card full-width">
+          <div class="table-card-title">Topic vs Accuracy</div>
+          <div class="table-scroll">
+            <table id="tbl-topic-acc" class="an-table" aria-label="Topic accuracy table">
+              <thead>
+                <tr>
+                  <th>Topic</th>
+                  <th>Messages</th>
+                  <th>Rated</th>
+                  <th>Accuracy %</th>
+                </tr>
+              </thead>
+              <tbody id="tbl-topic-acc-body"></tbody>
+            </table>
+          </div>
+        </div>
 
-      <!-- FR22: End-session confirmation toast -->
-      <div class="an-toast hidden" id="an-toast" role="status" aria-live="polite"></div>
+      </section><!-- /an-content -->
 
     </main>
   </div><!-- /page-shell -->
