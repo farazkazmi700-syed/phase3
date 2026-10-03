@@ -613,6 +613,24 @@ body.sidebar-open {
   white-space: nowrap;
 }
 
+.chat-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-new-chat {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 8px;
+}
+
+.btn-new-chat svg {
+  flex: 0 0 auto;
+}
+
 .connection-status {
   display: flex;
   align-items: center;
@@ -721,11 +739,18 @@ body.sidebar-open {
   font-weight: 800;
 }
 
+.msg-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .message.assistant .msg-avatar {
   border-color: var(--purple);
   background: var(--purple-soft);
   color: var(--white);
-  font-size: 9px;
+  font-size: 8px;
   white-space: nowrap;
 }
 
@@ -733,13 +758,6 @@ body.sidebar-open {
   border-color: var(--blue);
   background: var(--blue);
   color: var(--white);
-}
-
-.message.user .msg-avatar img {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: cover;
 }
 
 .msg-content {
@@ -1258,6 +1276,14 @@ body.sidebar-open {
 
   .connection-status {
     width: 100%;
+  }
+
+  .chat-header-actions {
+    gap: 8px;
+  }
+
+  .chat-page-topbar .connection-status {
+    width: auto;
   }
 
   .login-body {

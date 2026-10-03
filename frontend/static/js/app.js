@@ -84,7 +84,7 @@ const ui = {
     const isAssistant = role === 'assistant';
     const userAvatar = document.getElementById('user-avatar')?.src;
     const avatarContent = isAssistant
-      ? 'LLaMA 3'
+      ? 'Ollama'
       : userAvatar
         ? `<img src="${ui.escapeHtml(userAvatar)}" alt="">`
         : 'You';
@@ -109,10 +109,11 @@ const ui = {
   },
 
   renderWelcome() {
+    const userName = document.querySelector('.user-name')?.textContent.trim() || 'there';
     document.getElementById('messages-container').innerHTML = `
       <div class="welcome-message" id="welcome-message">
-        <h2>New Chat</h2>
-        <p>Ask me anything. This page keeps only the current conversation.</p>
+        <h2>Welcome, ${ui.escapeHtml(userName)}.</h2>
+        <p>What would you like to explore today?</p>
         <div class="suggestion-chips">
           <button class="chip" onclick="app.sendSuggestion('Explain machine learning in simple terms')">Machine learning</button>
           <button class="chip" onclick="app.sendSuggestion('Write a Python hello world program')">Python code</button>
@@ -129,7 +130,7 @@ const ui = {
     typing.className = 'message assistant typing-indicator';
     typing.id = 'typing-indicator';
     typing.innerHTML = `
-      <div class="msg-avatar">LLaMA 3</div>
+      <div class="msg-avatar">Ollama</div>
       <div class="msg-content">
         <div class="msg-bubble">
           <span class="typing-dot"></span>
@@ -181,6 +182,7 @@ const app = {
   // Register button, keyboard, logout, and input-resize actions for the chat page.
   bindEvents() {
     document.getElementById('btn-send').addEventListener('click', app.handleSend);
+    document.getElementById('btn-new-chat')?.addEventListener('click', app.startNewChat);
     document.getElementById('btn-logout')?.addEventListener('click', app.handleLogout);
     document.getElementById('btn-chat-feedback').addEventListener('click', app.submitMandatoryFeedback);
     document.getElementById('message-input').addEventListener('keydown', event => {
@@ -320,7 +322,11 @@ const app = {
   // FR7/FR8: start a fresh independent multi-turn chat by asking the backend
   // for a unique session id.
   async startNewChat() {
-    if (app.pendingFeedbackMessageId) return;
+    if (app.pendingFeedbackMessageId) {
+      app.showMandatoryFeedback();
+      return;
+    }
+    app.currentSessionId = null;
     ui.renderWelcome();
     document.getElementById('message-input').focus();
     try {
