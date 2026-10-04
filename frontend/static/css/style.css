@@ -166,7 +166,7 @@ textarea:focus-visible {
   isolation: isolate;
   background:
     linear-gradient(180deg, rgba(87, 119, 207, 0.619), rgba(5, 7, 13, 0.78)),
-    url("/static/img/login-ai.png") center / cover no-repeat;
+    url("/static/img/login.png") center / cover no-repeat;
   background-attachment: fixed;
 }
 
@@ -179,7 +179,6 @@ textarea:focus-visible {
     radial-gradient(circle at 72% 36%, rgba(37, 99, 235, 0.22), transparent 22rem),
     radial-gradient(circle at 18% 80%, rgba(34, 197, 94, 0.14), transparent 18rem),
     linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.62));
-  backdrop-filter: saturate(1.08) contrast(1.05);
 }
 
 .login-body::after {
@@ -187,7 +186,7 @@ textarea:focus-visible {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: radial-gradient(ellipse at center, transparent 42%, rgba(0, 0, 0, 0.62) 100%);
+  background: radial-gradient(ellipse at center, transparent 100%, rgba(218, 213, 213, 0.62) 100%);
 }
 
 .login-container {
@@ -241,7 +240,7 @@ textarea:focus-visible {
   border-radius: var(--radius);
   background: var(--glass);
   padding: clamp(20px, 40vw, 38px);
-  backdrop-filter: blur(14px);
+  backdrop-filter: none;
   box-shadow: var(--shadow);
 }
 
@@ -1290,7 +1289,7 @@ body.sidebar-open {
     min-height: 100svh;
     background:
       linear-gradient(180deg, rgba(0, 0, 0, 0.58), rgba(5, 7, 13, 0.9)),
-      url("/static/img/login-ai.png") 42% center / cover no-repeat;
+      url("/static/img/login.png") 42% center / cover no-repeat;
     background-attachment: scroll;
   }
 
@@ -2104,7 +2103,6 @@ code.session-id {
   }
 
 }
-
 
 
 
