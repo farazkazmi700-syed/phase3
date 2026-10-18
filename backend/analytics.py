@@ -7,7 +7,7 @@ Blueprint exposing three routes:
 """
 
 import re
-import uuid
+import json
 from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template
@@ -18,8 +18,8 @@ from .utils import current_user, current_user_id, now_iso, require_login
 analytics_bp = Blueprint("analytics", __name__)
 
 # ---------------------------------------------------------------------------
-# FR15: canonical topic domains mapped from the raw topic_label keywords.
-# The first matching keyword wins; Machine Learning is the fallback.
+# FR15: canonical topic domains mapped from user-message keywords.
+# General is used when a message does not contain a domain signal.
 # ---------------------------------------------------------------------------
 TOPIC_MAP = [
     ("Machine Learning",  ["machine learning", "ml", "regression", "classification",
@@ -33,12 +33,12 @@ TOPIC_MAP = [
                            "treatment", "symptom", "cancer", "health"]),
     ("Power Systems",     ["power", "energy", "grid", "electricity", "voltage",
                            "load forecasting", "renewable", "solar", "wind",
-                           "battery", "inverter", "transformer", "scada"]),
+                           "battery", "inverter", "scada"]),
     ("E-commerce AI",     ["ecommerce", "e-commerce", "recommendation", "product",
                            "shopping", "cart", "checkout", "price", "inventory",
                            "customer", "fraud", "personalisation", "personaliz"]),
 ]
-TOPIC_DOMAINS = tuple(domain for domain, _ in TOPIC_MAP)
+TOPIC_DOMAINS = tuple(domain for domain, _ in TOPIC_MAP) + ("General",)
 TOPIC_PATTERNS = tuple(
     (
         domain,
@@ -57,7 +57,7 @@ PHASES = ("Start", "Middle", "End")
 # FR14: Data retrieval
 # ---------------------------------------------------------------------------
 
-def fetch_session_data(user_id: str) -> list[dict]:
+def fetch_session_data(user_id: str, session_id: str | None = None) -> list[dict]:
     """
     FR14: Retrieve every assistant message together with its feedback for the
     given user.  Returns a list of plain dicts so they can be processed and
@@ -71,16 +71,6 @@ def fetch_session_data(user_id: str) -> list[dict]:
             m.session_id,
             m.content,
             m.topic_label,
-                        (
-                                SELECT u.content
-                                FROM messages u
-                                WHERE u.session_id = m.session_id
-                                    AND u.user_id = m.user_id
-                                    AND u.role = 'user'
-                                    AND u.rowid < m.rowid
-                                ORDER BY u.rowid DESC
-                                LIMIT 1
-                        ) AS user_message,
             m.created_at,
             m.response_time_ms,
             f.rating,
@@ -90,9 +80,10 @@ def fetch_session_data(user_id: str) -> list[dict]:
         LEFT   JOIN feedback f ON f.message_id = m.id
         WHERE  m.user_id = ?
           AND  m.role    = 'assistant'
+          AND  (? IS NULL OR m.session_id = ?)
         ORDER  BY m.created_at ASC, m.rowid ASC
         """,
-        (user_id,),
+        (user_id, session_id, session_id),
     ).fetchall()
 
     return [dict(r) for r in rows]
@@ -119,14 +110,14 @@ def fetch_session_list(user_id: str) -> list[dict]:
 
 def classify_topic(label: str | None) -> str:
     """
-    FR15: Map a raw topic_label string to one of the five canonical domains.
+    FR15: Map a user message to one canonical domain.
     Matching is case-insensitive whole-keyword scoring; the strongest match wins.
-    Returns 'Machine Learning' if no keyword matches.
+    Returns 'General' when no domain keyword matches.
     """
     if not label:
-        return TOPIC_DOMAINS[0]
+        return "General"
 
-    best_domain = TOPIC_DOMAINS[0]
+    best_domain = "General"
     best_score = 0
     for domain, patterns in TOPIC_PATTERNS:
         score = sum(pattern.search(label) is not None for pattern in patterns)
@@ -176,7 +167,8 @@ def compute_metrics(rows: list[dict]) -> dict:
     for session_rows in sessions.values():
         total = len(session_rows)
         for idx, row in enumerate(session_rows):
-            row["topic"] = classify_topic(row.get("user_message") or row.get("topic_label"))
+            stored_topic = row.get("topic_label")
+            row["topic"] = stored_topic if stored_topic in TOPIC_DOMAINS else "General"
             row["phase"] = segment_phase(idx, total)
 
     # Flatten back to a single list for aggregate calculations.
@@ -339,9 +331,9 @@ def compute_metrics(rows: list[dict]) -> dict:
     }
 
 
-def build_analytics_payload(user_id: str) -> dict:
+def build_analytics_payload(user_id: str, session_id: str | None = None) -> dict:
     """Combine raw data retrieval and metric computation into one payload."""
-    rows    = fetch_session_data(user_id)
+    rows    = fetch_session_data(user_id, session_id)
     metrics = compute_metrics(rows)
     return metrics
 
@@ -369,37 +361,47 @@ def analytics_data():
 
 
 def save_final_analytics_summary(user_id: str, session_id: str) -> str:
-    """Permanently save one account summary for a signed-in session."""
+    """Persist one summary for the ended chat session, if it has responses."""
     db = get_db()
+    session = db.execute(
+        "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ).fetchone()
+    if not session:
+        raise ValueError("Chat session not found for analytics summary.")
+
     existing = db.execute(
-        "SELECT id FROM analytics_summaries WHERE user_id = ? AND session_id = ?",
+        "SELECT session_id FROM analytics_summaries WHERE user_id = ? AND session_id = ?",
         (user_id, session_id),
     ).fetchone()
     if existing:
-        return existing["id"]
+        return existing["session_id"]
 
-    payload = build_analytics_payload(user_id)
-    summary_id = str(uuid.uuid4())
+    payload = build_analytics_payload(user_id, session_id)
+    if payload["total_messages"] == 0:
+        return session_id
+
     db.execute(
         """
-        INSERT INTO analytics_summaries
-        (id, user_id, session_id, overall_accuracy, avg_rating,
-         correct_count, partial_count, incorrect_count,
-         total_messages, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+        INSERT OR IGNORE INTO analytics_summaries
+        (session_id, user_id, overall_accuracy, avg_rating,
+         correct_count, partial_count, incorrect_count, total_messages,
+         topic_breakdown, phase_breakdown, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
-            summary_id,
-            user_id,
             session_id,
+            user_id,
             payload["overall_accuracy"],
             payload["avg_rating"],
             payload["correct_count"],
             payload["partial_count"],
             payload["incorrect_count"],
             payload["total_messages"],
+            json.dumps(payload["topic_accuracy"]),
+            json.dumps(payload["phase_accuracy"]),
             now_iso(),
         ),
     )
     db.commit()
-    return summary_id
+    return session_id

@@ -161,8 +161,6 @@ def auth_callback():
         session["username"] = profile["name"]
         session["email"] = profile["email"]
         session["picture_url"] = profile["picture_url"]
-        session["analytics_session_id"] = str(uuid.uuid4())
-
         return redirect(redirect_target)
     except Exception as exc:
         return render_template("login.html", error=f"Authentication failed: {exc}")
@@ -172,11 +170,12 @@ def auth_callback():
 @auth_bp.route("/auth/logout")
 @require_login
 def logout():
-    """Save the final analytics summary before clearing the login session."""
+    """Save the active chat summary before clearing the login session."""
     user_id = session["user_id"]
-    analytics_session_id = session.get("analytics_session_id") or str(uuid.uuid4())
+    active_session_id = session.get("active_chat_session_id")
     try:
-        save_final_analytics_summary(user_id, analytics_session_id)
+        if active_session_id:
+            save_final_analytics_summary(user_id, active_session_id)
     except Exception:
         return (
             "Could not save the final analytics summary. You are still signed in; "

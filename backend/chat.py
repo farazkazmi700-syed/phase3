@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, render_template, session
 
-from .analytics import classify_topic
+from .analytics import classify_topic, save_final_analytics_summary
 from .db import get_db
 from .llm import LocalLlamaError, build_llm_messages, query_llama
 from .utils import current_user, current_user_id, json_payload, now_iso, require_login
@@ -42,6 +42,7 @@ def create_chat_session(db, first_message: str | None = None) -> tuple[str, str]
         "INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
         (session_id, current_user_id(), session_title(first_message), timestamp, timestamp),
     )
+    session["active_chat_session_id"] = session_id
     return session_id, timestamp
 
 
@@ -105,12 +106,34 @@ def session_has_pending_feedback(db, session_id: str) -> bool:
 def new_chat_session():
     """FR7: generate a unique session ID before the first chat message is sent."""
     db = get_db()
+    previous_session_id = json_payload().get("ended_session_id")
+    if previous_session_id:
+        try:
+            save_final_analytics_summary(current_user_id(), previous_session_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     session_id, timestamp = create_chat_session(db)
     db.commit()
     return jsonify({
         "session_id": session_id,
         "created_at": timestamp,
     })
+
+
+@chat_bp.route("/chat/session/end", methods=["POST"])
+@require_login
+def end_chat_session():
+    """FR22: persist analytics when a chat tab/session ends."""
+    session_id = json_payload().get("session_id") or session.get("active_chat_session_id")
+    if not session_id:
+        return jsonify({"success": True, "saved": False})
+    try:
+        save_final_analytics_summary(current_user_id(), session_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if session.get("active_chat_session_id") == session_id:
+        session.pop("active_chat_session_id", None)
+    return jsonify({"success": True, "saved": True})
 
 
 @chat_bp.route("/chat/send", methods=["POST"])

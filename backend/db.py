@@ -101,20 +101,23 @@ def init_db():
         """
     )
 
-    # FR22: analytics_summaries stores one permanent record per signed-in session.
+    # FR22: analytics_summaries stores one permanent record per chat session.
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS analytics_summaries (
-            id               TEXT PRIMARY KEY,
+            session_id       TEXT PRIMARY KEY,
             user_id          TEXT NOT NULL,
-            session_id       TEXT NOT NULL,
             overall_accuracy REAL,
             avg_rating       REAL,
             correct_count    INTEGER,
             partial_count    INTEGER,
             incorrect_count  INTEGER,
             total_messages   INTEGER,
-            created_at       TEXT NOT NULL
+            topic_breakdown  TEXT NOT NULL DEFAULT '{}',
+            phase_breakdown  TEXT NOT NULL DEFAULT '{}',
+            created_at       TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
         """
     )
@@ -125,6 +128,59 @@ def init_db():
     cursor.execute("DROP TABLE IF EXISTS logout_feedback")
     cursor.execute("DROP TABLE IF EXISTS general_feedback")
     cursor.execute("DROP TABLE IF EXISTS general_feedback_starts")
+
+    # Migrate the old FR22 table, whose random summary IDs and ALL-user
+    # aggregates were not tied to an actual chat session.
+    summary_columns = {
+        row[1] for row in cursor.execute("PRAGMA table_info(analytics_summaries)").fetchall()
+    }
+    summary_fks = {
+        (row[2], row[3])
+        for row in cursor.execute("PRAGMA foreign_key_list(analytics_summaries)").fetchall()
+    }
+    required_summary_columns = {"topic_breakdown", "phase_breakdown"}
+    required_summary_fks = {("chat_sessions", "session_id"), ("users", "user_id")}
+    if (
+        not required_summary_columns.issubset(summary_columns)
+        or not required_summary_fks.issubset(summary_fks)
+        or "id" in summary_columns
+    ):
+        cursor.execute("ALTER TABLE analytics_summaries RENAME TO analytics_summaries_old")
+        cursor.execute(
+            """
+            CREATE TABLE analytics_summaries (
+                session_id       TEXT PRIMARY KEY,
+                user_id          TEXT NOT NULL,
+                overall_accuracy REAL,
+                avg_rating       REAL,
+                correct_count    INTEGER,
+                partial_count    INTEGER,
+                incorrect_count  INTEGER,
+                total_messages   INTEGER,
+                topic_breakdown  TEXT NOT NULL DEFAULT '{}',
+                phase_breakdown  TEXT NOT NULL DEFAULT '{}',
+                created_at       TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO analytics_summaries
+            (session_id, user_id, overall_accuracy, avg_rating, correct_count,
+             partial_count, incorrect_count, total_messages, topic_breakdown,
+             phase_breakdown, created_at)
+            SELECT old.session_id, old.user_id, old.overall_accuracy, old.avg_rating,
+                   old.correct_count, old.partial_count, old.incorrect_count,
+                   old.total_messages, '{}', '{}', old.created_at
+            FROM analytics_summaries_old old
+            JOIN chat_sessions cs ON cs.id = old.session_id
+            JOIN users u ON u.id = old.user_id
+            """
+        )
+        cursor.execute("DROP TABLE analytics_summaries_old")
+    db.commit()
 
     # Existing databases need a table rebuild because SQLite cannot add a
     # foreign-key constraint to an existing table with ALTER TABLE.
