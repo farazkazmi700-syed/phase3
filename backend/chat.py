@@ -74,7 +74,9 @@ def load_session_context(db, session_id: str):
         SELECT role, content
         FROM messages
         WHERE session_id = ?
-        ORDER BY created_at ASC
+        -- created_at has second-level precision; rowid preserves insertion
+        -- order when a user message and its assistant reply share a timestamp.
+        ORDER BY created_at ASC, rowid ASC
         """,
         (session_id,),
     ).fetchall()

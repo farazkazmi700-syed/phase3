@@ -90,7 +90,7 @@ def fetch_session_data(user_id: str) -> list[dict]:
         LEFT   JOIN feedback f ON f.message_id = m.id
         WHERE  m.user_id = ?
           AND  m.role    = 'assistant'
-        ORDER  BY m.created_at ASC
+        ORDER  BY m.created_at ASC, m.rowid ASC
         """,
         (user_id,),
     ).fetchall()

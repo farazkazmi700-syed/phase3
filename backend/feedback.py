@@ -51,21 +51,22 @@ def submit_feedback():
     if not message:
         return jsonify({"error": "Assistant message not found."}), 404
 
-    existing = db.execute(
-        "SELECT id FROM feedback WHERE message_id = ? AND user_id = ?",
-        (message_id, current_user_id()),
-    ).fetchone()
-
-    if existing:
-        db.execute(
-            "UPDATE feedback SET rating = ?, correctness = ?, length_type = ?, comment = ? WHERE message_id = ? AND user_id = ?",
-            (rating, correctness, length_type, comment, message_id, current_user_id()),
-        )
-    else:
-        db.execute(
-            "INSERT INTO feedback (id, message_id, session_id, user_id, rating, correctness, length_type, comment, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (str(uuid.uuid4()), message_id, session_id, current_user_id(), rating, correctness, length_type, comment, now_iso()),
-        )
+    # The UNIQUE(message_id) constraint and this UPSERT make duplicate
+    # submissions safe even when two requests arrive concurrently.
+    db.execute(
+        """
+        INSERT INTO feedback
+        (id, message_id, session_id, user_id, rating, correctness, length_type, comment, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(message_id) DO UPDATE SET
+            rating = excluded.rating,
+            correctness = excluded.correctness,
+            length_type = excluded.length_type,
+            comment = excluded.comment
+        """,
+        (str(uuid.uuid4()), message_id, session_id, current_user_id(), rating,
+         correctness, length_type, comment, now_iso()),
+    )
 
     db.commit()
     return jsonify({"success": True})

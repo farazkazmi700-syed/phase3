@@ -86,7 +86,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS feedback (
             id              TEXT PRIMARY KEY,
-            message_id      TEXT NOT NULL,
+            message_id      TEXT NOT NULL UNIQUE,
             session_id      TEXT NOT NULL,
             user_id         TEXT NOT NULL,
             rating          INTEGER,
@@ -143,7 +143,7 @@ def init_db():
             """
             CREATE TABLE feedback (
                 id              TEXT PRIMARY KEY,
-                message_id      TEXT NOT NULL,
+                message_id      TEXT NOT NULL UNIQUE,
                 session_id      TEXT NOT NULL,
                 user_id         TEXT NOT NULL,
                 rating          INTEGER,
@@ -175,6 +175,24 @@ def init_db():
     if "comment" not in feedback_columns:
         cursor.execute("ALTER TABLE feedback ADD COLUMN comment TEXT")
         db.commit()
+
+    # Enforce one feedback row per assistant message at the database level.
+    # If a legacy database contains duplicates, retain the newest row first.
+    cursor.execute(
+        """
+        DELETE FROM feedback
+        WHERE rowid NOT IN (
+            SELECT MAX(rowid)
+            FROM feedback
+            GROUP BY message_id
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_message_id_unique "
+        "ON feedback(message_id)"
+    )
+    db.commit()
 
     # FR10: keep old message tables compatible with response-time tracking.
     message_columns = [row[1] for row in cursor.execute("PRAGMA table_info(messages)").fetchall()]
