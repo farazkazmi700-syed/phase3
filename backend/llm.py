@@ -63,7 +63,10 @@ class OllamaModelManager:
             "messages": messages,
             "stream": True,
             "keep_alive": -1,
-            "options": {"num_predict": 1024, "temperature": 0.7},
+            "options": {
+                "num_predict": Config.LLAMA_MAX_TOKENS,
+                "temperature": Config.LLAMA_TEMPERATURE,
+            },
         }
 
         try:

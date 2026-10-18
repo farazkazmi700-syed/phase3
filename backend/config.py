@@ -21,6 +21,9 @@ class Config:
     # Ollama serves the local Llama model over this loopback HTTP endpoint.
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
     LLAMA_MODEL = os.getenv("LLAMA_MODEL", "llama3.2:3b").strip()
+    # Keep replies concise by default; override for longer answers when needed.
+    LLAMA_MAX_TOKENS = int(os.getenv("LLAMA_MAX_TOKENS", "512"))
+    LLAMA_TEMPERATURE = float(os.getenv("LLAMA_TEMPERATURE", "0.7"))
     DATABASE_PATH = os.getenv("DATABASE_PATH") or "chatbot.db"
     if not Path(DATABASE_PATH).is_absolute():
         DATABASE_PATH = str(BASE_DIR / DATABASE_PATH)
