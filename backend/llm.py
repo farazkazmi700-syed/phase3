@@ -1,3 +1,4 @@
+import json
 import requests
 from threading import Lock
 
@@ -49,14 +50,18 @@ class OllamaModelManager:
             print("LLaMA model loaded successfully.", flush=True)
 
     def chat(self, messages: list) -> str:
-        """Run inference using the model already resident in Ollama."""
+        """Run inference and return the complete response for compatibility."""
+        return "".join(self.stream_chat(messages))
+
+    def stream_chat(self, messages: list):
+        """Yield response text chunks from Ollama as they are generated."""
         if not self._loaded:
             raise LocalLlamaError("LLaMA was not loaded during backend startup.")
 
         payload = {
             "model": Config.LLAMA_MODEL,
             "messages": messages,
-            "stream": False,
+            "stream": True,
             "keep_alive": -1,
             "options": {"num_predict": 1024, "temperature": 0.7},
         }
@@ -65,11 +70,19 @@ class OllamaModelManager:
             response = requests.post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
                 json=payload,
-                timeout=120,
+                stream=True,
+                timeout=(10, 120),
             )
             response.raise_for_status()
-            data = response.json()
-            return data["message"]["content"]
+            for line in response.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                data = json.loads(line)
+                chunk = data.get("message", {}).get("content", "")
+                if chunk:
+                    yield chunk
+                if data.get("done"):
+                    break
         except requests.exceptions.Timeout as exc:
             raise LocalLlamaError("The local Llama model timed out. Please try again.") from exc
         except requests.exceptions.RequestException as exc:
@@ -77,7 +90,7 @@ class OllamaModelManager:
                 "Could not reach Ollama. Start Ollama and make sure the model is installed "
                 f"with `ollama pull {Config.LLAMA_MODEL}`."
             ) from exc
-        except (KeyError, IndexError) as exc:
+        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise LocalLlamaError("Unexpected response format from the local Llama runtime.") from exc
 
 

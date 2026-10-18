@@ -1,11 +1,12 @@
 import uuid
+import json
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, render_template, session
+from flask import Blueprint, Response, jsonify, render_template, session, stream_with_context
 
 from .analytics import classify_topic, save_final_analytics_summary
 from .db import get_db
-from .llm import LocalLlamaError, build_llm_messages, query_llama
+from .llm import LocalLlamaError, build_llm_messages, model_manager
 from .utils import current_user, current_user_id, json_payload, now_iso, require_login
 
 chat_bp = Blueprint("chat", __name__)
@@ -177,53 +178,53 @@ def send_message_frontend():
     # naturally between topics without losing previous conversational context.
     context_rows = load_session_context(db, session_id)
 
-    try:
-        # FR10: capture the request timestamp immediately before calling LLaMA 3.
+    @stream_with_context
+    def response_stream():
+        """Forward model chunks and commit the completed assistant message."""
         request_started_at = datetime.now(timezone.utc)
-        # FR9: send the session context to LLaMA 3 and wait for its generated reply.
-        assistant_content = query_llama(build_llm_messages(context_rows))
-        # FR10: capture the response timestamp immediately after LLaMA 3 returns.
-        response_received_at = datetime.now(timezone.utc)
-    except LocalLlamaError as exc:
-        db.rollback()
-        return jsonify({"error": str(exc)}), 502
+        assistant_parts = []
+        try:
+            for chunk in model_manager.stream_chat(build_llm_messages(context_rows)):
+                assistant_parts.append(chunk)
+                yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
 
-    # FR10: response time is calculated from the response and request timestamps.
-    response_time_ms = round((response_received_at - request_started_at).total_seconds() * 1000)
-    request_ts = request_started_at.strftime("%Y-%m-%dT%H:%M:%SZ")
-    reply_ts = response_received_at.strftime("%Y-%m-%dT%H:%M:%SZ")
-    assistant_msg_id = str(uuid.uuid4())
-    db.execute(
-        """
-        INSERT INTO messages
-        (id, session_id, user_id, role, content, topic_label, created_at, request_started_at, response_received_at, response_time_ms)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-        """,
-        (
-            assistant_msg_id,
-            session_id,
-            current_user_id(),
-            "assistant",
-            assistant_content,
-            topic_label,
-            reply_ts,
-            request_ts,
-            reply_ts,
-            response_time_ms,
-        ),
+            response_received_at = datetime.now(timezone.utc)
+            assistant_content = "".join(assistant_parts)
+            response_time_ms = round((response_received_at - request_started_at).total_seconds() * 1000)
+            request_ts = request_started_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+            reply_ts = response_received_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+            assistant_msg_id = str(uuid.uuid4())
+            db.execute(
+                """
+                INSERT INTO messages
+                (id, session_id, user_id, role, content, topic_label, created_at,
+                 request_started_at, response_received_at, response_time_ms)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (assistant_msg_id, session_id, current_user_id(), "assistant",
+                 assistant_content, topic_label, reply_ts, request_ts, reply_ts,
+                 response_time_ms),
+            )
+            db.execute("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", (reply_ts, session_id))
+            db.commit()
+            yield json.dumps({
+                "type": "done",
+                "session_id": session_id,
+                "user_message_id": user_msg_id,
+                "message_id": assistant_msg_id,
+                "response": assistant_content,
+                "timestamp": reply_ts,
+                "request_started_at": request_ts,
+                "response_received_at": reply_ts,
+                "response_time_ms": response_time_ms,
+                "topic_label": topic_label,
+            }) + "\n"
+        except LocalLlamaError as exc:
+            db.rollback()
+            yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
+
+    return Response(
+        response_stream(),
+        mimetype="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-    db.execute("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", (reply_ts, session_id))
-    db.commit()
-
-    # FR9/FR10: return the generated response and timing data to the browser.
-    return jsonify({
-        "session_id": session_id,
-        "user_message_id": user_msg_id,
-        "message_id": assistant_msg_id,
-        "response": assistant_content,
-        "timestamp": reply_ts,
-        "request_started_at": request_ts,
-        "response_received_at": reply_ts,
-        "response_time_ms": response_time_ms,
-        "topic_label": topic_label,
-    })
