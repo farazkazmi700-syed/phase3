@@ -30,24 +30,7 @@ def submit_feedback():
 
     db = get_db()
     if not message_id or not session_id:
-        db.execute(
-            """
-            INSERT INTO general_feedback
-            (id, user_id, rating, correctness, length_type, comment, created_at)
-            VALUES (?,?,?,?,?,?,?)
-            """,
-            (
-                str(uuid.uuid4()),
-                current_user_id(),
-                rating,
-                correctness,
-                length_type,
-                comment,
-                now_iso(),
-            ),
-        )
-        db.commit()
-        return jsonify({"success": True, "scope": "general"})
+        return jsonify({"error": "A message and session are required for feedback."}), 400
 
     # FR12: message feedback is mandatory and must include all required fields.
     if rating not in (1, 2, 3, 4):

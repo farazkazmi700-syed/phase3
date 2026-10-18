@@ -5,10 +5,19 @@ from flask import g
 from .config import Config
 
 
+def configure_connection(db):
+    """Apply SQLite settings that must be enabled for every connection."""
+    db.execute("PRAGMA foreign_keys = ON")
+    db.execute("PRAGMA busy_timeout = 5000")
+    return db
+
+
 def get_db():
     """Open or reuse the SQLite database connection for the current request."""
     if "db" not in g:
-        g.db = sqlite3.connect(Config.DATABASE_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+        g.db = configure_connection(
+            sqlite3.connect(Config.DATABASE_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+        )
         g.db.row_factory = sqlite3.Row
     return g.db
 
@@ -22,7 +31,8 @@ def close_db(error=None):
 
 def init_db():
     """Create the app tables needed for users, chats, and feedback."""
-    db = sqlite3.connect(Config.DATABASE_PATH)
+    db = configure_connection(sqlite3.connect(Config.DATABASE_PATH))
+    db.execute("PRAGMA journal_mode = WAL")
     cursor = db.cursor()
 
     cursor.execute(
@@ -84,33 +94,9 @@ def init_db():
             length_type     TEXT,
             comment         TEXT,
             created_at      TEXT NOT NULL,
-            FOREIGN KEY (message_id) REFERENCES messages(id)
-        )
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS general_feedback (
-            id              TEXT PRIMARY KEY,
-            user_id         TEXT NOT NULL,
-            rating          INTEGER,
-            correctness     TEXT,
-            length_type     TEXT,
-            comment         TEXT,
-            created_at      TEXT NOT NULL
-        )
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS logout_feedback (
-            id          TEXT PRIMARY KEY,
-            user_id     TEXT NOT NULL,
-            rating      INTEGER NOT NULL,
-            comment     TEXT,
-            created_at  TEXT NOT NULL
+            FOREIGN KEY (message_id) REFERENCES messages(id),
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
         """
     )
@@ -133,6 +119,55 @@ def init_db():
         """
     )
 
+    db.commit()
+
+    # Remove deprecated feedback stores from existing local databases.
+    cursor.execute("DROP TABLE IF EXISTS logout_feedback")
+    cursor.execute("DROP TABLE IF EXISTS general_feedback")
+    cursor.execute("DROP TABLE IF EXISTS general_feedback_starts")
+
+    # Existing databases need a table rebuild because SQLite cannot add a
+    # foreign-key constraint to an existing table with ALTER TABLE.
+    feedback_fks = {
+        (row[2], row[3])
+        for row in cursor.execute("PRAGMA foreign_key_list(feedback)").fetchall()
+    }
+    required_fks = {
+        ("message_id", "messages"),
+        ("session_id", "chat_sessions"),
+        ("user_id", "users"),
+    }
+    if not required_fks.issubset(feedback_fks):
+        cursor.execute("ALTER TABLE feedback RENAME TO feedback_old")
+        cursor.execute(
+            """
+            CREATE TABLE feedback (
+                id              TEXT PRIMARY KEY,
+                message_id      TEXT NOT NULL,
+                session_id      TEXT NOT NULL,
+                user_id         TEXT NOT NULL,
+                rating          INTEGER,
+                correctness     TEXT,
+                length_type     TEXT,
+                comment         TEXT,
+                created_at      TEXT NOT NULL,
+                FOREIGN KEY (message_id) REFERENCES messages(id),
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO feedback
+            (id, message_id, session_id, user_id, rating, correctness,
+             length_type, comment, created_at)
+            SELECT id, message_id, session_id, user_id, rating, correctness,
+                   length_type, comment, created_at
+            FROM feedback_old
+            """
+        )
+        cursor.execute("DROP TABLE feedback_old")
     db.commit()
 
     # Keep old local databases compatible with the current feedback form.
