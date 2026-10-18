@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chat</title>
   <link rel="stylesheet" href="/static/css/style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body class="chat-body">
   <!-- Left navigation panel: app identity, page links, and user account actions. -->
@@ -34,7 +32,7 @@
         <img
           class="user-avatar"
           id="user-avatar"
-          src="{{ user.get('picture', '') or 'https://ui-avatars.com/api/?name=User&background=111111&color=ffffff' }}"
+            src="{{ user.get('picture', '') or url_for('static', filename='img/avatar.svg') }}"
           alt="Profile"
         />
         <div class="user-info">

@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Feedback - Multi-Turn AI Chatbot</title>
   <link rel="stylesheet" href="/static/css/style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body class="page-body feedback-body">
   <div class="page-shell">
@@ -33,7 +31,7 @@
         <div class="user-profile">
           <img
             class="user-avatar"
-            src="{{ user.get('picture', '') or 'https://ui-avatars.com/api/?name=User&background=111111&color=ffffff' }}"
+            src="{{ user.get('picture', '') or url_for('static', filename='img/avatar.svg') }}"
             alt="Profile"
           />
           <div class="user-info">

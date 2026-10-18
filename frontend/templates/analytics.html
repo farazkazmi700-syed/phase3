@@ -7,12 +7,8 @@
 
   <!-- Shared stylesheet -->
   <link rel="stylesheet" href="/static/css/style.css" />
-  <!-- Analytics-specific stylesheet (appended to style.css) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-
-  <!-- Chart.js CDN — used for all FR20 graphs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- Analytics charts are rendered by the bundled offline chart renderer. -->
+  <script src="{{ url_for('static', filename='js/chart.js') }}"></script>
 </head>
 <body class="page-body analytics-body">
   <div class="page-shell">
@@ -42,7 +38,7 @@
         <div class="user-profile">
           <img
             class="user-avatar"
-            src="{{ user.get('picture', '') or 'https://ui-avatars.com/api/?name=User&background=111111&color=ffffff' }}"
+            src="{{ user.get('picture', '') or url_for('static', filename='img/avatar.svg') }}"
             alt="{{ user.get('name', 'User') }} profile"
             title="{{ user.get('name', 'User') }} ({{ user.get('email', '') }})"
           />

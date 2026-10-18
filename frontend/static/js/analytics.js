@@ -29,25 +29,29 @@ const PALETTE = {
   background: '#1E293B',
 };
 
-const TOPIC_DOMAINS = [
-  'Machine Learning',
-  'Deep Learning',
-  'Healthcare AI',
-  'Power Systems',
-  'E-commerce AI',
-];
 const TOPIC_CHART_COLORS = {
   'Machine Learning': PALETTE.red,
   'Deep Learning': PALETTE.orange,
   'Healthcare AI': PALETTE.yellow,
   'Power Systems': PALETTE.green,
   'E-commerce AI': '#5081A2',
+  'General': PALETTE.cyan,
 };
+const TOPIC_FALLBACK_COLORS = [PALETTE.blue, PALETTE.purple, PALETTE.pink, PALETTE.cyan];
+
+function topicLabels(topicAccuracy) {
+  return Object.keys(topicAccuracy || {});
+}
+
+function topicColor(label, index) {
+  return TOPIC_CHART_COLORS[label]
+    || TOPIC_FALLBACK_COLORS[index % TOPIC_FALLBACK_COLORS.length];
+}
 
 /* Chart.js global defaults for dark theme */
 Chart.defaults.color            = PALETTE.muted;
 Chart.defaults.borderColor      = PALETTE.border;
-Chart.defaults.font.family      = "'Inter', sans-serif";
+Chart.defaults.font.family      = "'Segoe UI', Arial, sans-serif";
 Chart.defaults.font.size        = 12;
 Chart.defaults.plugins.legend.labels.boxWidth = 14;
 Chart.defaults.plugins.legend.labels.padding  = 14;
@@ -147,9 +151,9 @@ function renderKPICards(d) {
  * Shows the share of messages for each AI domain.
  */
 function renderTopicDistChart(topicAccuracy) {
-  const labels = TOPIC_DOMAINS;
+  const labels = topicLabels(topicAccuracy);
   const data   = labels.map(label => topicAccuracy[label]?.count ?? 0);
-  const colors = labels.map(label => TOPIC_CHART_COLORS[label]);
+  const colors = labels.map(topicColor);
 
   makeChart('chart-topic-dist', 'pie', {
     labels,
@@ -177,9 +181,9 @@ function renderTopicDistChart(topicAccuracy) {
  * Displays accuracy percentage for each classified domain.
  */
 function renderTopicAccChart(topicAccuracy) {
-  const labels   = TOPIC_DOMAINS;
+  const labels   = topicLabels(topicAccuracy);
   const accData  = labels.map(label => topicAccuracy[label]?.accuracy ?? 0);
-  const colors   = labels.map(label => TOPIC_CHART_COLORS[label]);
+  const colors   = labels.map(topicColor);
 
   makeChart('chart-topic-acc', 'bar', {
     labels,

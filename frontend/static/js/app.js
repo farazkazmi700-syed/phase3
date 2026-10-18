@@ -2,19 +2,36 @@
 
 // Network calls: send chat messages and check server health.
 const api = {
-  async createSession() {
+  async createSession(endedSessionId = null) {
     const res = await fetch('/chat/session/new', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      body: JSON.stringify({ ended_session_id: endedSessionId }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${res.status}`);
     }
+
     return res.json();
   },
 
-  async sendMessage(content, sessionId) {
+  async endSession(sessionId) {
+    if (!sessionId) return;
+    const res = await fetch('/chat/session/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
+
+  async sendMessage(content, sessionId, onChunk) {
     // FR9: send the user's query to the backend route that calls LLaMA 3.
     const res = await fetch('/chat/send', {
       method: 'POST',
@@ -26,7 +43,32 @@ const api = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${res.status}`);
     }
-    return res.json();
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming is not supported by this browser.');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line.replace(/\r$/, ''));
+        if (event.type === 'chunk') onChunk?.(event.content);
+        if (event.type === 'error') throw new Error(event.error);
+        if (event.type === 'done') result = event;
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      const event = JSON.parse(buffer.replace(/\r$/, ''));
+      if (event.type === 'error') throw new Error(event.error);
+      if (event.type === 'done') result = event;
+    }
+    if (!result) throw new Error('The model ended without a complete response.');
+    return result;
   },
 
   async submitFeedback(payload) {
@@ -36,9 +78,12 @@ const api = {
       credentials: 'include',
       body: JSON.stringify(payload),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    return res.json();
   },
 
   async checkHealth() {
@@ -106,6 +151,52 @@ const ui = {
 
     container.appendChild(message);
     container.scrollTop = container.scrollHeight;
+  },
+
+  beginStreamingMessage() {
+    document.getElementById('welcome-message')?.remove();
+    const container = document.getElementById('messages-container');
+    const message = document.createElement('div');
+    message.className = 'message assistant';
+    message.innerHTML = `
+      <div class="msg-avatar">Ollama</div>
+      <div class="msg-content">
+        <div class="msg-bubble"></div>
+        <div class="msg-meta"><span class="streaming-status">Generating…</span></div>
+      </div>
+    `;
+    container.appendChild(message);
+    container.scrollTop = container.scrollHeight;
+    return message;
+  },
+
+  appendStreamingChunk(message, chunk) {
+    message._streamText = (message._streamText || '') + chunk;
+    if (message._streamFrame) return;
+    message._streamFrame = requestAnimationFrame(() => {
+      const bubble = message.querySelector('.msg-bubble');
+      bubble.innerHTML = ui.escapeHtml(message._streamText).replaceAll('\n', '<br>');
+      message.querySelector('.streaming-status').textContent = 'Generating…';
+      document.getElementById('messages-container').scrollTop =
+        document.getElementById('messages-container').scrollHeight;
+      message._streamFrame = null;
+    });
+  },
+
+  finishStreamingMessage(message, result) {
+    if (message._streamFrame) cancelAnimationFrame(message._streamFrame);
+    message._streamFrame = null;
+    message.querySelector('.msg-bubble').innerHTML =
+      ui.escapeHtml(result.response).replaceAll('\n', '<br>');
+    message.dataset.msgId = result.message_id;
+    message.querySelector('.streaming-status').outerHTML = `
+      <span>${ui.formatTime(result.timestamp)}</span>
+      <span>${result.response_time_ms} ms</span>
+      <button class="btn-feedback-trigger" data-id="${ui.escapeHtml(result.message_id)}">Feedback</button>
+    `;
+    message.querySelector('.btn-feedback-trigger').addEventListener('click', event => {
+      feedback.open(event.currentTarget.dataset.id);
+    });
   },
 
   renderWelcome() {
@@ -185,6 +276,7 @@ const app = {
     document.getElementById('btn-new-chat')?.addEventListener('click', app.startNewChat);
     document.getElementById('btn-logout')?.addEventListener('click', app.handleLogout);
     document.getElementById('btn-chat-feedback').addEventListener('click', app.submitMandatoryFeedback);
+    window.addEventListener('pagehide', app.persistSessionOnPageHide);
     document.getElementById('message-input').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
@@ -245,20 +337,27 @@ const app = {
     document.getElementById('btn-send').disabled = true;
     ui.appendMessage('user', content, null, new Date().toISOString());
     ui.showTyping();
+    let streamingMessage = null;
 
     try {
       if (!app.currentSessionId) {
         const session = await api.createSession();
         app.currentSessionId = session.session_id;
       }
-      const result = await api.sendMessage(content, app.currentSessionId);
-      app.currentSessionId = result.session_id;
       ui.hideTyping();
-      // FR9/FR10: display the generated LLaMA 3 response with its tracked response time.
-      ui.appendMessage('assistant', result.response, result.message_id, result.timestamp, result.response_time_ms);
+      streamingMessage = ui.beginStreamingMessage();
+      const result = await api.sendMessage(
+        content,
+        app.currentSessionId,
+        chunk => ui.appendStreamingChunk(streamingMessage, chunk),
+      );
+      app.currentSessionId = result.session_id;
+      // FR9/FR10: the response was rendered incrementally and is now finalized.
+      ui.finishStreamingMessage(streamingMessage, result);
       app.requireFeedback(result.message_id);
     } catch (err) {
       ui.hideTyping();
+      streamingMessage?.remove();
       ui.appendMessage('assistant', `Error: ${err.message}. Please try again.`, null, new Date().toISOString());
     } finally {
       app.isLoading = false;
@@ -326,6 +425,15 @@ const app = {
       app.showMandatoryFeedback();
       return;
     }
+    const endedSessionId = app.currentSessionId;
+    if (endedSessionId) {
+      try {
+        await api.endSession(endedSessionId);
+      } catch (err) {
+        console.error('Could not save chat analytics summary:', err);
+        return;
+      }
+    }
     app.currentSessionId = null;
     ui.renderWelcome();
     document.getElementById('message-input').focus();
@@ -335,6 +443,15 @@ const app = {
     } catch {
       app.currentSessionId = null;
     }
+  },
+
+  persistSessionOnPageHide() {
+    if (!app.currentSessionId || !navigator.sendBeacon) return;
+    const body = new Blob(
+      [JSON.stringify({ session_id: app.currentSessionId })],
+      { type: 'application/json' },
+    );
+    navigator.sendBeacon('/chat/session/end', body);
   },
 
   sendSuggestion(text) {
