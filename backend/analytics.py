@@ -8,9 +8,8 @@ Blueprint exposing three routes:
 
 import re
 import json
-from datetime import datetime
 
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, jsonify, render_template, request
 
 from .db import get_db
 from .utils import current_user, current_user_id, now_iso, require_login
@@ -18,8 +17,8 @@ from .utils import current_user, current_user_id, now_iso, require_login
 analytics_bp = Blueprint("analytics", __name__)
 
 # ---------------------------------------------------------------------------
-# FR15: canonical topic domains mapped from user-message keywords.
-# General is used when a message does not contain a domain signal.
+# FR15: the only valid topic domains, mapped from user-message keywords.
+# Every message is assigned to a subject domain, including unmatched messages.
 # ---------------------------------------------------------------------------
 TOPIC_MAP = [
     ("Machine Learning",  ["machine learning", "ml", "regression", "classification",
@@ -38,7 +37,7 @@ TOPIC_MAP = [
                            "shopping", "cart", "checkout", "price", "inventory",
                            "customer", "fraud", "personalisation", "personaliz"]),
 ]
-TOPIC_DOMAINS = tuple(domain for domain, _ in TOPIC_MAP) + ("General",)
+TOPIC_DOMAINS = tuple(domain for domain, _ in TOPIC_MAP)
 TOPIC_PATTERNS = tuple(
     (
         domain,
@@ -59,9 +58,9 @@ PHASES = ("Start", "Middle", "End")
 
 def fetch_session_data(user_id: str, session_id: str | None = None) -> list[dict]:
     """
-    FR14: Retrieve every assistant message together with its feedback for the
-    given user.  Returns a list of plain dicts so they can be processed and
-    serialised without depending on sqlite3.Row.
+    FR14: Retrieve assistant messages with their interaction's stored user
+    topic and associated feedback, scoped to the supplied user. Returns plain
+    dictionaries for analytics processing and JSON serialization.
     """
     db = get_db()
     rows = db.execute(
@@ -70,7 +69,7 @@ def fetch_session_data(user_id: str, session_id: str | None = None) -> list[dict
             m.id            AS message_id,
             m.session_id,
             m.content,
-            m.topic_label,
+            COALESCE(user_message.topic_label, m.topic_label) AS topic_label,
             m.created_at,
             m.response_time_ms,
             f.rating,
@@ -78,6 +77,19 @@ def fetch_session_data(user_id: str, session_id: str | None = None) -> list[dict
             f.length_type
         FROM   messages m
         LEFT   JOIN feedback f ON f.message_id = m.id
+        LEFT   JOIN messages user_message
+               ON user_message.session_id = m.session_id
+              AND user_message.user_id = m.user_id
+              AND user_message.role = 'user'
+              AND user_message.created_at <= m.created_at
+              AND user_message.rowid = (
+                  SELECT MAX(prior_user.rowid)
+                  FROM messages prior_user
+                  WHERE prior_user.session_id = m.session_id
+                    AND prior_user.user_id = m.user_id
+                    AND prior_user.role = 'user'
+                    AND prior_user.created_at <= m.created_at
+              )
         WHERE  m.user_id = ?
           AND  m.role    = 'assistant'
           AND  (? IS NULL OR m.session_id = ?)
@@ -112,12 +124,13 @@ def classify_topic(label: str | None) -> str:
     """
     FR15: Map a user message to one canonical domain.
     Matching is case-insensitive whole-keyword scoring; the strongest match wins.
-    Returns 'General' when no domain keyword matches.
+    Messages without a keyword match are assigned to the most relevant subject
+    domain by default, ensuring there is no uncategorized category.
     """
     if not label:
-        return "General"
+        return "Machine Learning"
 
-    best_domain = "General"
+    best_domain = "Machine Learning"
     best_score = 0
     for domain, patterns in TOPIC_PATTERNS:
         score = sum(pattern.search(label) is not None for pattern in patterns)
@@ -163,12 +176,12 @@ def compute_metrics(rows: list[dict]) -> dict:
     for row in rows:
         sessions.setdefault(row["session_id"], []).append(row)
 
-    # Augment each row with its classified topic and phase label.
+    # Augment each response with its interaction topic and phase label.
     for session_rows in sessions.values():
         total = len(session_rows)
         for idx, row in enumerate(session_rows):
             stored_topic = row.get("topic_label")
-            row["topic"] = stored_topic if stored_topic in TOPIC_DOMAINS else "General"
+            row["topic"] = stored_topic if stored_topic in TOPIC_DOMAINS else classify_topic(row.get("content"))
             row["phase"] = segment_phase(idx, total)
 
     # Flatten back to a single list for aggregate calculations.
@@ -206,8 +219,6 @@ def compute_metrics(rows: list[dict]) -> dict:
     }
     for row in all_rows:
         t = row["topic"]
-        if t not in topic_stats:
-            topic_stats[t] = {"count": 0, "acc_sum": 0.0, "rated": 0}
         topic_stats[t]["count"] += 1
         acc = reply_accuracy(row)
         if acc is not None:
@@ -224,11 +235,12 @@ def compute_metrics(rows: list[dict]) -> dict:
     }
 
     # ---- FR17: accuracy per phase ----------------------------------------
-    phase_stats: dict[str, dict] = {}
+    phase_stats: dict[str, dict] = {
+        phase: {"acc_sum": 0.0, "rated": 0, "count": 0}
+        for phase in PHASES
+    }
     for row in all_rows:
         p = row["phase"]
-        if p not in phase_stats:
-            phase_stats[p] = {"acc_sum": 0.0, "rated": 0, "count": 0}
         phase_stats[p]["count"] += 1
         acc = reply_accuracy(row)
         if acc is not None:
@@ -239,21 +251,20 @@ def compute_metrics(rows: list[dict]) -> dict:
         p: round((phase_stats[p]["acc_sum"] / phase_stats[p]["rated"] * 100), 1)
         if phase_stats[p]["rated"] else 0.0
         for p in PHASES
-        if p in phase_stats
     }
-    # Ensure all three phases exist in output (even with 0.0) for the chart.
-    for p in PHASES:
-        phase_accuracy.setdefault(p, 0.0)
+    phase_rated = {p: phase_stats[p]["rated"] for p in PHASES}
 
     # ---- FR17: response time statistics ----------------------------------
-    times = [r["response_time_ms"] for r in all_rows if r.get("response_time_ms") is not None]
+    timed_rows = [r for r in all_rows if r.get("response_time_ms") is not None]
+    times = [r["response_time_ms"] for r in timed_rows]
     response_time_stats = {
         "min":    min(times) if times else 0,
         "max":    max(times) if times else 0,
         "avg":    round(sum(times) / len(times), 1) if times else 0,
         "count":  len(times),
-        # Per-reply list for the trend line graph (FR20).
-        "series": [r.get("response_time_ms") or 0 for r in all_rows],
+        # Preserve gaps for replies without a measured response time.
+        "series": [r.get("response_time_ms") for r in all_rows],
+        "labels": [r["created_at"] for r in all_rows],
     }
 
     # ---- FR17: rating averages -------------------------------------------
@@ -276,10 +287,10 @@ def compute_metrics(rows: list[dict]) -> dict:
             "session_id":  row["session_id"][:8],
             "topic":       row["topic"],
             "phase":       row["phase"],
-            "correctness": row.get("correctness", "—"),
-            "accuracy":    round((reply_accuracy(row) or 0) * 100, 0),
+            "correctness": row.get("correctness") or "—",
+            "accuracy":    round(reply_accuracy(row) * 100, 0) if reply_accuracy(row) is not None else None,
             "rating":      row.get("rating"),
-            "length":      row.get("length_type", "—"),
+            "length":      row.get("length_type") or "—",
             "response_ms": row.get("response_time_ms"),
             "timestamp":   row.get("created_at"),
         }
@@ -302,6 +313,7 @@ def compute_metrics(rows: list[dict]) -> dict:
             "message_count": len(session_rows),
             "topics":       list({r["topic"] for r in session_rows}),
             "accuracy":     s_acc,
+            "rated_count":  len(s_rated),
             "avg_rating":   round(sum(s_ratings) / len(s_ratings), 2) if s_ratings else None,
             "created_at":   session_rows[0].get("created_at") if session_rows else None,
         })
@@ -313,6 +325,7 @@ def compute_metrics(rows: list[dict]) -> dict:
         "overall_accuracy":     overall_acc,
         "overall_correctness_pct": overall_correctness_pct,
         "avg_rating":           avg_rating,
+        "avg_rating_count":     len(ratings),
         # ---- FR18: correctness counts ------------------------------------
         "correct_count":        correct_count,
         "partial_count":        partial_count,
@@ -320,10 +333,15 @@ def compute_metrics(rows: list[dict]) -> dict:
         "rated_count":          rated_count,
         # ---- FR17: metric tables & graph data ----------------------------
         "topic_accuracy":       topic_accuracy,
+        "accuracy_rated_count": len(rated_rows),
         "phase_accuracy":       phase_accuracy,
+        "phase_rated":          phase_rated,
+        "phase_counts":         {p: phase_stats[p]["count"] for p in PHASES},
         "response_time_stats":  response_time_stats,
         "rating_distribution":  rating_dist,
+        "rating_count":         len(ratings),
         "length_distribution":  length_dist,
+        "length_count":         len(lengths),
         # ---- FR20: per-reply series for charts ---------------------------
         "reply_accuracy_series": reply_accuracy_series,
         # ---- FR21: session insights --------------------------------------
@@ -352,9 +370,17 @@ def analytics_page():
 @analytics_bp.route("/api/analytics/data")
 @require_login
 def analytics_data():
-    """FR14–FR21: Return the full analytics JSON payload for the dashboard."""
+    """FR14–FR21: Return full analytics or data for one owned session."""
     try:
-        payload = build_analytics_payload(current_user_id())
+        session_id = request.args.get("session_id") or None
+        if session_id:
+            owned_session = get_db().execute(
+                "SELECT 1 FROM chat_sessions WHERE id = ? AND user_id = ?",
+                (session_id, current_user_id()),
+            ).fetchone()
+            if not owned_session:
+                return jsonify({"error": "Session not found."}), 404
+        payload = build_analytics_payload(current_user_id(), session_id)
         return jsonify(payload)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

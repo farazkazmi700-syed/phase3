@@ -29,18 +29,20 @@ const PALETTE = {
   background: '#1E293B',
 };
 
+const TOPIC_ORDER = [
+  'Machine Learning', 'Deep Learning', 'Healthcare AI', 'Power Systems', 'E-commerce AI',
+];
 const TOPIC_CHART_COLORS = {
   'Machine Learning': PALETTE.red,
   'Deep Learning': PALETTE.orange,
   'Healthcare AI': PALETTE.yellow,
   'Power Systems': PALETTE.green,
   'E-commerce AI': '#5081A2',
-  'General': PALETTE.cyan,
 };
 const TOPIC_FALLBACK_COLORS = [PALETTE.blue, PALETTE.purple, PALETTE.pink, PALETTE.cyan];
 
 function topicLabels(topicAccuracy) {
-  return Object.keys(topicAccuracy || {});
+  return TOPIC_ORDER.filter(label => topicAccuracy && Object.hasOwn(topicAccuracy, label));
 }
 
 function topicColor(label, index) {
@@ -102,6 +104,7 @@ function makeChart(canvasId, type, data, options = {}) {
       tooltip: { callbacks: {} },
     },
     animation: { duration: 600, easing: 'easeInOutQuart' },
+    onResize: (chart) => chart.resize(),
   };
 
   // Deep-merge options into defaults (one level deep for plugins)
@@ -128,8 +131,8 @@ function renderKPICards(d) {
   const cards = [
     { label: 'Total Sessions',    value: d.total_sessions,                  color: 'blue'   },
     { label: 'Total Responses',   value: d.total_messages,                  color: 'purple' },
-    { label: 'Overall Accuracy',  value: `${d.overall_accuracy}%`,          color: 'green'  },
-    { label: 'Avg Rating',        value: `${d.avg_rating} / 4`,             color: 'yellow' },
+    { label: 'Overall Accuracy',  value: d.accuracy_rated_count ? `${d.overall_accuracy}%` : '—', color: 'green'  },
+    { label: 'Avg Rating',        value: d.avg_rating_count ? `${d.avg_rating} / 4` : '—', color: 'yellow' },
     { label: 'Correct Replies',   value: `${d.correct_count} / ${d.rated_count}`, color: 'green'  },
     { label: 'Incorrect Replies', value: `${d.incorrect_count} / ${d.rated_count}`, color: 'red'    },
   ];
@@ -154,6 +157,7 @@ function renderTopicDistChart(topicAccuracy) {
   const labels = topicLabels(topicAccuracy);
   const data   = labels.map(label => topicAccuracy[label]?.count ?? 0);
   const colors = labels.map(topicColor);
+  const total  = data.reduce((sum, count) => sum + count, 0);
 
   makeChart('chart-topic-dist', 'pie', {
     labels,
@@ -169,7 +173,10 @@ function renderTopicDistChart(topicAccuracy) {
       legend: { position: 'right' },
       tooltip: {
         callbacks: {
-          label: (ctx) => ` ${ctx.label}: ${ctx.parsed} messages`,
+          label: (ctx) => {
+            const share = total ? (ctx.parsed / total * 100).toFixed(1) : '0.0';
+            return ` ${ctx.label}: ${ctx.parsed} messages (${share}%)`;
+          },
         },
       },
     },
@@ -182,17 +189,31 @@ function renderTopicDistChart(topicAccuracy) {
  */
 function renderTopicAccChart(topicAccuracy) {
   const labels   = topicLabels(topicAccuracy);
-  const accData  = labels.map(label => topicAccuracy[label]?.accuracy ?? 0);
+  const accData  = labels.map(label => topicAccuracy[label]?.rated ? topicAccuracy[label].accuracy : null);
   const colors   = labels.map(topicColor);
+  const dataWithGaps = labels.flatMap((label, index) => index < labels.length - 1
+    ? [accData[index], null]
+    : [accData[index]]);
+  const labelsWithGaps = labels.flatMap((label, index) => index < labels.length - 1
+    ? [label, '']
+    : [label]);
+  const colorsWithGaps = colors.flatMap((color, index) => index < colors.length - 1
+    ? [color, 'transparent']
+    : [color]);
+  if (!accData.some(value => value != null)) {
+    makeChart('chart-topic-acc', 'bar', { labels, datasets: [{ data: [] }] });
+    return;
+  }
 
   makeChart('chart-topic-acc', 'bar', {
-    labels,
+    labels: labelsWithGaps,
     datasets: [{
       label:           'Accuracy %',
-      data:            accData,
-      backgroundColor: colors.map(c => c + 'BB'),
-      borderColor:     colors,
+      data:            dataWithGaps,
+      backgroundColor: colorsWithGaps.map(c => c === 'transparent' ? 'transparent' : c + 'BB'),
+      borderColor:     colorsWithGaps,
       borderWidth:     2,
+      skipNull:        true,
       borderRadius:    6,
     }],
   }, {
@@ -203,11 +224,11 @@ function renderTopicAccChart(topicAccuracy) {
         ticks: { callback: v => `${v}%` },
         grid:  { color: PALETTE.border },
       },
-      x: { grid: { display: false } },
+      x: { grid: { display: false }, ticks: { autoSkip: false } },
     },
     plugins: {
       legend:  { display: false },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}%` } },
+      tooltip: { callbacks: { label: ctx => ctx.raw == null ? '' : ` ${ctx.parsed.y}%` } },
     },
   });
 }
@@ -216,15 +237,21 @@ function renderTopicAccChart(topicAccuracy) {
  * FR20: Accuracy vs Phase line graph.
  * Shows how accuracy changes across Start, Middle, and End phases.
  */
-function renderPhaseAccChart(phaseAccuracy) {
+function renderPhaseAccChart(phaseAccuracy, phaseRated) {
   const phases = ['Start', 'Middle', 'End'];
-  const data   = phases.map(p => phaseAccuracy[p] ?? 0);
+  const data   = phases.map(p => phaseRated?.[p] ? phaseAccuracy[p] : null);
+  const ratedPhases = data.filter(value => value != null).length;
+  if (!ratedPhases) {
+    makeChart('chart-phase-acc', 'line', { labels: phases, datasets: [{ data: [] }] });
+    return;
+  }
 
   makeChart('chart-phase-acc', 'line', {
     labels: phases,
     datasets: [{
       label:           'Accuracy %',
       data,
+      spanGaps: false,
       borderColor:     PALETTE.green,
       backgroundColor: PALETTE.green + '33',
       pointBackgroundColor: PALETTE.green,
@@ -260,6 +287,7 @@ function renderReplyAccChart(series) {
   const labels  = display.map(r => `#${r.index}`);
   const data    = display.map(r => r.accuracy);
   const colors  = display.map(r =>
+    r.accuracy == null ? PALETTE.muted :
     r.accuracy >= 75 ? PALETTE.green :
     r.accuracy >= 40 ? PALETTE.yellow :
     PALETTE.red
@@ -274,6 +302,7 @@ function renderReplyAccChart(series) {
       borderColor:     colors,
       borderWidth:     1,
       borderRadius:    4,
+      skipNull:        true,
     }],
   }, {
     scales: {
@@ -290,7 +319,7 @@ function renderReplyAccChart(series) {
     },
     plugins: {
       legend:  { display: false },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}%` } },
+      tooltip: { callbacks: { label: ctx => ctx.raw == null ? ' Not rated' : ` ${ctx.parsed.y}%` } },
     },
   });
 }
@@ -300,34 +329,42 @@ function renderReplyAccChart(series) {
  * Shows latency in milliseconds for each reply in chronological order.
  */
 function renderResponseTimeChart(timeSeries) {
-  const labels = timeSeries.map((_, i) => `#${i + 1}`);
+  const measuredCount = timeSeries.filter(value => value != null).length;
+  const stride = Math.max(1, Math.ceil(timeSeries.length / 8));
+  const labels = timeSeries.map((_, index) => index % stride === 0 ? `${index + 1}` : '');
+  if (!measuredCount) {
+    makeChart('chart-response-time', 'line', { labels, datasets: [{ data: [] }] });
+    return;
+  }
 
   makeChart('chart-response-time', 'line', {
     labels,
     datasets: [{
-      label:           'Response Time (ms)',
+      label:           'Response time trend (ms)',
       data:            timeSeries,
+      spanGaps:         false,
       borderColor:     PALETTE.orange,
       backgroundColor: PALETTE.orange + '22',
-      pointRadius:     timeSeries.length < 20 ? 4 : 2,
-      fill:            true,
-      tension:         0.3,
+      pointRadius:     0,
+      fill:            false,
+      tension:         0,
     }],
   }, {
     scales: {
       y: {
         beginAtZero: true,
+        border: { display: true, color: PALETTE.border },
         ticks: { callback: v => `${v}ms` },
         grid:  { color: PALETTE.border },
       },
       x: {
-        ticks: { maxRotation: 0, font: { size: 10 }, maxTicksLimit: 12 },
+        ticks: { maxRotation: 0, font: { size: 9 }, maxTicksLimit: 8 },
         grid:  { display: false },
       },
     },
     plugins: {
       legend:  { display: false },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y} ms` } },
+      tooltip: { callbacks: { label: ctx => ctx.raw == null ? '' : ` ${ctx.parsed.y} ms` } },
     },
   });
 }
@@ -427,12 +464,12 @@ function phaseBadge(val) {
  * FR19: Topic vs accuracy table
  */
 function renderTopicAccTable(topicAccuracy) {
-  const rows = Object.entries(topicAccuracy).map(([topic, v]) => `
+  const rows = TOPIC_ORDER.map(topic => [topic, topicAccuracy[topic]]).filter(([, v]) => v).map(([topic, v]) => `
     <tr>
       <td>${esc(topic)}</td>
       <td class="td-num">${v.count}</td>
       <td class="td-num">${v.rated}</td>
-      <td class="td-num accent-${v.accuracy >= 70 ? 'green' : v.accuracy >= 40 ? 'yellow' : 'red'}">${v.accuracy}%</td>
+      <td class="td-num accent-${v.rated ? (v.accuracy >= 70 ? 'green' : v.accuracy >= 40 ? 'yellow' : 'red') : 'yellow'}">${v.rated ? `${v.accuracy}%` : '—'}</td>
     </tr>
   `);
   fillTable('tbl-topic-acc-body', rows);
@@ -450,7 +487,7 @@ function renderReplyCorrectnessTable(series) {
       <td>${esc(r.topic)}</td>
       <td>${phaseBadge(r.phase)}</td>
       <td>${correctnessBadge(r.correctness)}</td>
-      <td class="td-num">${r.accuracy}%</td>
+      <td class="td-num">${r.accuracy == null ? '—' : `${r.accuracy}%`}</td>
       <td class="td-num">${r.rating ?? '—'}</td>
       <td>${esc(r.length)}</td>
     </tr>
@@ -461,12 +498,12 @@ function renderReplyCorrectnessTable(series) {
 /**
  * FR19: Phase-wise accuracy table
  */
-function renderPhaseAccTable(phaseAccuracy) {
+function renderPhaseAccTable(phaseAccuracy, phaseRated, phaseCounts) {
   const phases = ['Start', 'Middle', 'End'];
   const rows = phases.map(p => `
     <tr>
       <td>${phaseBadge(p)}</td>
-      <td class="td-num accent-${(phaseAccuracy[p] ?? 0) >= 70 ? 'green' : 'yellow'}">${phaseAccuracy[p] ?? 0}%</td>
+      <td class="td-num accent-${(phaseAccuracy[p] ?? 0) >= 70 ? 'green' : 'yellow'}">${phaseRated?.[p] ? `${phaseAccuracy[p]}% (${phaseRated[p]}/${phaseCounts?.[p] ?? phaseRated[p]} rated)` : '—'}</td>
     </tr>
   `);
   fillTable('tbl-phase-acc-body', rows);
@@ -526,7 +563,7 @@ function renderSessionInsightsTable(sessions) {
       <td>${formatDateTime(s.created_at)}</td>
       <td class="td-num">${s.message_count}</td>
       <td>${s.topics.map(t => `<span class="an-badge badge-topic">${esc(t)}</span>`).join(' ')}</td>
-      <td class="td-num">${s.accuracy != null ? s.accuracy + '%' : '—'}</td>
+      <td class="td-num">${s.accuracy != null ? `${s.accuracy}% (${s.rated_count} rated)` : '—'}</td>
       <td class="td-num">${s.avg_rating != null ? s.avg_rating + ' / 4' : '—'}</td>
     </tr>
   `);
@@ -566,7 +603,7 @@ async function initAnalytics() {
     // Render all FR20 charts
     renderTopicDistChart(data.topic_accuracy);
     renderTopicAccChart(data.topic_accuracy);
-    renderPhaseAccChart(data.phase_accuracy);
+    renderPhaseAccChart(data.phase_accuracy, data.phase_rated);
     renderReplyAccChart(data.reply_accuracy_series);
     renderResponseTimeChart(data.response_time_stats.series);
     renderRatingDistChart(data.rating_distribution);
@@ -575,7 +612,7 @@ async function initAnalytics() {
     // Populate all FR19 tables
     renderTopicAccTable(data.topic_accuracy);
     renderReplyCorrectnessTable(data.reply_accuracy_series);
-    renderPhaseAccTable(data.phase_accuracy);
+    renderPhaseAccTable(data.phase_accuracy, data.phase_rated, data.phase_counts);
     renderResponseTimeSummaryTable(data.response_time_stats);
     renderRatingDistTable(data.rating_distribution);
     renderLengthPrefTable(data.length_distribution);

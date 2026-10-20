@@ -9,15 +9,16 @@ support filtering to an individual ended chat session.
 
 ## FR15: Topic Classification
 
-The system shall classify each user message when it is stored into one of these
-domains:
+The system shall classify each user message when it is stored into exactly one of
+these subject domains:
 
 - Machine Learning
 - Deep Learning
 - Healthcare AI
 - Power Systems
 - E-commerce AI
+Every message shall be assigned to one of these domains; the system shall not use
+an "Other", "General", or uncategorized category. If a message does not clearly
+match a domain, the system shall still assign it to the most relevant subject
+domain.
 
-Messages without a matching domain signal shall use the `General` fallback.
-Analytics shall use the stored topic label rather than reclassifying message
-text.
