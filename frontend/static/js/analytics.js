@@ -463,15 +463,29 @@ function phaseBadge(val) {
 /**
  * FR19: Topic vs accuracy table
  */
-function renderTopicAccTable(topicAccuracy) {
-  const rows = TOPIC_ORDER.map(topic => [topic, topicAccuracy[topic]]).filter(([, v]) => v).map(([topic, v]) => `
+function renderTopicAccTable(topicAccuracy, replySeries = []) {
+  const replyCounts = replySeries.reduce((counts, reply) => {
+    if (!counts[reply.topic]) counts[reply.topic] = { correct: 0, partial: 0, incorrect: 0 };
+    const status = String(reply.correctness || '').toLowerCase();
+    if (Object.hasOwn(counts[reply.topic], status)) counts[reply.topic][status] += 1;
+    return counts;
+  }, {});
+  const rows = TOPIC_ORDER.map(topic => [topic, topicAccuracy[topic]]).filter(([, v]) => v).map(([topic, v]) => {
+    const outcomes = replyCounts[topic] || { correct: 0, partial: 0, incorrect: 0 };
+    const notRated = Math.max(0, v.count - v.rated);
+    return `
     <tr>
       <td>${esc(topic)}</td>
       <td class="td-num">${v.count}</td>
       <td class="td-num">${v.rated}</td>
+      <td class="td-num">${notRated}</td>
+      <td class="td-num">${outcomes.correct}</td>
+      <td class="td-num">${outcomes.partial}</td>
+      <td class="td-num">${outcomes.incorrect}</td>
       <td class="td-num accent-${v.rated ? (v.accuracy >= 70 ? 'green' : v.accuracy >= 40 ? 'yellow' : 'red') : 'yellow'}">${v.rated ? `${v.accuracy}%` : '—'}</td>
     </tr>
-  `);
+  `;
+  });
   fillTable('tbl-topic-acc-body', rows);
 }
 
@@ -610,7 +624,7 @@ async function initAnalytics() {
     renderLengthDistChart(data.length_distribution);
 
     // Populate all FR19 tables
-    renderTopicAccTable(data.topic_accuracy);
+    renderTopicAccTable(data.topic_accuracy, data.reply_accuracy_series);
     renderReplyCorrectnessTable(data.reply_accuracy_series);
     renderPhaseAccTable(data.phase_accuracy, data.phase_rated, data.phase_counts);
     renderResponseTimeSummaryTable(data.response_time_stats);
